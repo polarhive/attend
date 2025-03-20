@@ -2,152 +2,185 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from datetime import datetime
+from fastapi import FastAPI
 import logging
+import telebot
+from datetime import datetime
+from threading import Thread
+import matplotlib.pyplot as plt
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
 load_dotenv()
+
+# Load environment variables
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+PESU_USERNAME = os.getenv("PESU_USERNAME")
+PESU_PASSWORD = os.getenv("PESU_PASSWORD")
+
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+app = FastAPI()
+
+SUBJECT_MAPPING = {
+    'UE23CS241B': 'DAA',
+    'UE23CS242B': 'OS',
+    'UE23CS251B': 'MPCA',
+    'UE23CS252B': 'CN',
+    'UE23MA241B': 'LA',
+    'UZ23UZ221B': 'CIE'
+}
 
 class PESUAttendanceScraper:
     def __init__(self):
         self.session = requests.Session()
         self.base_url = "https://www.pesuacademy.com/Academy"
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-            'X-Requested-With': 'XMLHttpRequest'
-        }
+        self.username = PESU_USERNAME
+        self.password = PESU_PASSWORD
         self.csrf_token = None
-
-        # Load configurable variables from .env
-        self.username = os.getenv('PESU_USERNAME')
-        self.password = os.getenv('PESU_PASSWORD')
-        self.bunkable_threshold = float(os.getenv('BUNKABLE_THRESHOLD', 75))
-        self.batch_class_id = os.getenv('BATCH_CLASS_ID', '2660')
-        self.controller_mode = os.getenv('CONTROLLER_MODE', '6407')
-        self.action_type = os.getenv('ACTION_TYPE', '8')
-        self.menu_id = os.getenv('MENU_ID', '660')
-
-        if not self.username or not self.password:
-            raise Exception("Username or password not found in .env file.")
 
     def get_csrf_token(self, html):
         soup = BeautifulSoup(html, 'html.parser')
-        csrf_token = soup.find('input', {'name': '_csrf'})['value']
-        logger.info("Extracted CSRF Token")
-        return csrf_token
+        csrf_input = soup.find('input', {'name': '_csrf'})
+        if csrf_input:
+            return csrf_input['value']
+        raise Exception("CSRF token not found")
 
     def login(self):
-        login_url = f"{self.base_url}/j_spring_security_check"
         login_page = f"{self.base_url}/"
-        logger.info("Fetching login page...")
+        login_url = f"{self.base_url}/j_spring_security_check"
         response = self.session.get(login_page)
         self.csrf_token = self.get_csrf_token(response.text)
-        
-        login_data = {
+
+        payload = {
             'j_username': self.username,
             'j_password': self.password,
             '_csrf': self.csrf_token
         }
-        
-        logger.info("Attempting login...")
-        response = self.session.post(login_url, data=login_data, headers=self.headers)
-        logger.info(f"Login response status code: {response.status_code}")
-        
-        if "Invalid username or password" in response.text:
-            logger.error("Login failed. Check credentials.")
+
+        login_response = self.session.post(login_url, data=payload)
+
+        if "Invalid username or password" in login_response.text:
             raise Exception("Login failed: Invalid credentials")
-        
+
+    def fetch_attendance(self):
         dashboard = self.session.get(f"{self.base_url}/s/studentProfilePESU")
         self.csrf_token = self.get_csrf_token(dashboard.text)
 
-    def fetch_attendance(self):
         attendance_url = f"{self.base_url}/s/studentProfilePESUAdmin"
-        
         payload = {
-            'controllerMode': self.controller_mode,
-            'actionType': self.action_type,
-            'batchClassId': self.batch_class_id,
-            'menuId': self.menu_id,
+            'controllerMode': '6407',
+            'actionType': '8',
+            'batchClassId': '2660',
+            'menuId': '660',
             '_csrf': self.csrf_token
         }
-        logger.info("Prepared attendance payload")
-        
-        response = self.session.post(
-            attendance_url,
-            data=payload,
-            headers={**self.headers, 'X-CSRF-Token': self.csrf_token}
-        )
-        logger.info(f"Attendance response status code: {response.status_code}")
-        
+
+        response = self.session.post(attendance_url, data=payload)
+
         if response.status_code != 200:
-            logger.error("Attendance request failed. Check payload or authentication.")
-            raise Exception(f"Attendance request failed with status code {response.status_code}")
-        
-        return response.text
+            raise Exception("Failed to fetch attendance")
+
+        return self.parse_attendance(response.text)
 
     def parse_attendance(self, html):
-        logger.info("Parsing attendance data...")
         soup = BeautifulSoup(html, 'html.parser')
         table = soup.find('table', {'class': 'table'})
-        
+
         if not table:
-            logger.error("Attendance table not found in HTML.")
             raise Exception("Attendance table not found")
-        
-        headers = [th.text.strip() for th in table.find('thead').find_all('th')]
-        rows = []
-        
+
+        attendance_data = []
         for row in table.find('tbody').find_all('tr'):
-            cells = [cell.text.strip() for cell in row.find_all('td')]
-            rows.append(cells)
-        
-        logger.info("Successfully parsed attendance data")
-        return headers, rows
+            columns = [cell.text.strip() for cell in row.find_all('td')]
+            attendance_data.append(columns)
 
-    def calculate_bunkable(self, total_classes, attended_classes):
-        """
-        Calculate bunkable classes based on the threshold from .env
-        """
-        total_classes = int(total_classes.split('/')[1])
-        attended_classes = int(attended_classes.split('/')[0])
-        required_classes = int((self.bunkable_threshold / 100) * total_classes)
-        bunkable_classes = attended_classes - required_classes
-        return max(0, bunkable_classes)
+        return attendance_data
 
-    def save_to_csv(self, headers, data):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"attendance_{timestamp}.csv"
-        headers.append("Bunkable")
-        
-        with open(filename, 'w', encoding='utf-8') as f:
-            f.write(','.join(headers) + '\n')
-            for row in data:
-                total_classes = row[2]
-                attended_classes = row[2].split('/')[0]
-                bunkable = self.calculate_bunkable(total_classes, attended_classes)
-                row.append(str(bunkable))
-                f.write(','.join(row) + '\n')
-        
-        logger.info(f"Attendance saved to {filename}")
+    def calculate_bunkable(self, total_classes, attended_classes, threshold=75):
+        total_classes = int(total_classes)
+        attended_classes = int(attended_classes)
 
-    def run(self):
-        try:
-            logger.info("Starting scraper...")
-            self.login()
-            logger.info("Logged in successfully!")
-            
-            attendance_html = self.fetch_attendance()
-            headers, data = self.parse_attendance(attendance_html)
-            
-            self.save_to_csv(headers, data)
-            
-        except Exception as e:
-            logger.error(f"Error: {str(e)}")
+        max_bunkable = 0
+        while True:
+            if ((attended_classes / (total_classes + max_bunkable)) * 100) < threshold:
+                break
+            max_bunkable += 1
 
-if __name__ == "__main__":
-    scraper = PESUAttendanceScraper()
-    scraper.run()
+        return max_bunkable - 1
+
+@app.get('/attendance')
+def get_attendance():
+    return {"status": "API is running"}
+
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    bot.reply_to(message, "Welcome to PESU Attendance Bot!\nUse /get to check your attendance and visualize bunkable classes.")
+
+@bot.message_handler(commands=['get'])
+def send_attendance(message):
+    try:
+        scraper = PESUAttendanceScraper()
+        scraper.login()
+        data = scraper.fetch_attendance()
+
+        subjects = []
+        attended = []
+        total = []
+        bunked = []
+        response = "📊 Your Attendance:\n"
+
+        for item in data:
+            subject_name = SUBJECT_MAPPING.get(item[0], item[0])
+            attended_classes, total_classes = map(int, item[2].split("/"))
+            bunkable = scraper.calculate_bunkable(total_classes, attended_classes)
+            percentage = (attended_classes / total_classes) * 100
+
+            subjects.append(subject_name)
+            attended.append(attended_classes)
+            total.append(total_classes)
+            bunked.append(total_classes - attended_classes)
+
+            response += f"{subject_name}: {item[2]} ({percentage:.1f}% | Bunkable: {bunkable})\n"
+
+        # Generate graph
+        import matplotlib
+        matplotlib.use('Agg')
+
+        plt.figure(figsize=(12, 8))
+
+        for i, subject in enumerate(subjects):
+            plt.bar(f"{subject}\n{attended[i]}/{total[i]}", attended[i], color='seagreen', label='Attended' if i == 0 else "")
+            plt.bar(f"{subject}\n{attended[i]}/{total[i]}", bunked[i], bottom=attended[i], color='firebrick', label='Bunked' if i == 0 else "")
+            threshold_classes = (total[i] * 75) // 100
+            plt.text(i, threshold_classes + 1, f"75%: {threshold_classes}", ha='center', fontsize=9)
+
+        plt.xlabel("Subjects")
+        plt.ylabel("Classes")
+        plt.title("Attendance and Bunkable Classes")
+        plt.xticks(rotation=45, ha="right")
+        plt.legend()
+
+        graph_path = f"attendance_{message.chat.id}.png"
+        plt.tight_layout()
+        plt.savefig(graph_path)
+        plt.close()
+
+        with open(graph_path, 'rb') as photo:
+            bot.send_photo(message.chat.id, photo)
+
+        bot.reply_to(message, response)
+
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error: {str(e)}")
+
+def start_fastapi():
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+if __name__ == '__main__':
+    logger.info("Starting FastAPI and Telegram bot...")
+
+    Thread(target=start_fastapi).start()
+    bot.polling()
+
