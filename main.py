@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# Load environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PESU_USERNAME = os.getenv("PESU_USERNAME")
 PESU_PASSWORD = os.getenv("PESU_PASSWORD")
@@ -62,6 +61,10 @@ class PESUAttendanceScraper:
 
         if "Invalid username or password" in login_response.text:
             raise Exception("Login failed: Invalid credentials")
+
+    def logout(self):
+        logout_url = f"{self.base_url}/logout"
+        self.session.get(logout_url)
 
     def fetch_attendance(self):
         dashboard = self.session.get(f"{self.base_url}/s/studentProfilePESU")
@@ -123,6 +126,7 @@ def send_attendance(message):
         scraper = PESUAttendanceScraper()
         scraper.login()
         data = scraper.fetch_attendance()
+        scraper.logout()
 
         subjects = []
         attended = []
@@ -143,7 +147,6 @@ def send_attendance(message):
 
             response += f"{subject_name}: {item[2]} ({percentage:.1f}% | Bunkable: {bunkable})\n"
 
-        # Generate graph
         import matplotlib
         matplotlib.use('Agg')
 
@@ -152,8 +155,6 @@ def send_attendance(message):
         for i, subject in enumerate(subjects):
             plt.bar(f"{subject}\n{attended[i]}/{total[i]}", attended[i], color='seagreen', label='Attended' if i == 0 else "")
             plt.bar(f"{subject}\n{attended[i]}/{total[i]}", bunked[i], bottom=attended[i], color='firebrick', label='Bunked' if i == 0 else "")
-            threshold_classes = (total[i] * 75) // 100
-            plt.text(i, threshold_classes + 1, f"75%: {threshold_classes}", ha='center', fontsize=9)
 
         plt.xlabel("Subjects")
         plt.ylabel("Classes")
@@ -161,7 +162,9 @@ def send_attendance(message):
         plt.xticks(rotation=45, ha="right")
         plt.legend()
 
-        graph_path = f"attendance_{message.chat.id}.png"
+        os.makedirs("data", exist_ok=True)
+        graph_path = f"data/attendance_{message.chat.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
+
         plt.tight_layout()
         plt.savefig(graph_path)
         plt.close()
@@ -183,4 +186,3 @@ if __name__ == '__main__':
 
     Thread(target=start_fastapi).start()
     bot.polling()
-
