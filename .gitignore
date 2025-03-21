@@ -2,3 +2,4 @@
 *.png
 .env
 .venv
+data
