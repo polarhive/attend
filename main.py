@@ -170,6 +170,29 @@ def send_attendance_report(message):
 
             response += f"{subject_name}: {item[2]} ({percentage:.1f}% | Bunkable: {bunkable})\n"
 
+        logger.info("Generating attendance graph...")
+        plt.figure(figsize=(12, 8))
+
+        for i, subject in enumerate(subjects):
+            plt.bar(f"{subject}\n{attended[i]}/{total[i]}", attended[i], color='seagreen', label='Attended' if i == 0 else "")
+            plt.bar(f"{subject}\n{attended[i]}/{total[i]}", bunked[i], bottom=attended[i], color='firebrick', label='Bunked' if i == 0 else "")
+            plt.text(i, seventy_five_marks[i] + 1, f"75%: {seventy_five_marks[i]}", ha='center', fontsize=9)
+
+        plt.xlabel("Subjects")
+        plt.ylabel("Classes")
+        plt.title(f"Attendance (75% Threshold)")
+        plt.xticks(rotation=45, ha="right")
+        plt.legend(["Attended", "Bunked"])
+        plt.tight_layout()
+
+        graph_path = f"data/attendance_{CHAT_ID}.png"
+        plt.savefig(graph_path)
+        plt.close()
+
+        logger.info("Sending attendance graph...")
+        with open(graph_path, 'rb') as photo:
+            bot.send_photo(CHAT_ID, photo)
+
         bot.send_message(CHAT_ID, response)
 
     except Exception as e:
