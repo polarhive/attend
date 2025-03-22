@@ -203,7 +203,16 @@ def start_fastapi():
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
+def restart_bot():
+    logger.error("Restarting bot...")
+    os.execv(sys.executable, ['python'] + sys.argv)
+
 if __name__ == '__main__':
     logger.info("Starting FastAPI and Telegram bot...")
     Thread(target=start_fastapi).start()
-    bot.polling()
+    while True:
+        try:
+            bot.polling(none_stop=True, long_polling_timeout=60)
+        except Exception as e:
+            logger.error("Bot crashed with error: %s", e)
+            restart_bot()
