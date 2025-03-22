@@ -8,6 +8,8 @@ import telebot
 from datetime import datetime
 from threading import Thread
 import matplotlib.pyplot as plt
+import signal
+import sys
 
 load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -146,6 +148,8 @@ def send_attendance_report(message):
         bot.reply_to(message, "Unauthorized user. Access denied.")
         return
 
+    bot.reply_to(message, "Fetching data...")
+
     try:
         scraper = PESUAttendanceScraper()
         scraper.login()
@@ -206,6 +210,13 @@ def start_fastapi():
 def restart_bot():
     logger.error("Restarting bot...")
     os.execv(sys.executable, ['python'] + sys.argv)
+
+def shutdown_handler(sig, frame):
+    logger.info("Shutting down bot gracefully...")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, shutdown_handler)
+signal.signal(signal.SIGTERM, shutdown_handler)
 
 if __name__ == '__main__':
     logger.info("Starting FastAPI and Telegram bot...")
