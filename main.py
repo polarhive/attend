@@ -199,6 +199,14 @@ async def get_attendance(request: Request):
 async def serve_index():
     return FileResponse("index.html")
 
+@app.get("/healthcheck")
+async def healthcheck():
+    return {"message": "Pong"}
+
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse("favicon.ico")
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
