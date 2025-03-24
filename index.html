@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>PESU Attendance Tracker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+        }
+
+        form {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        label {
+            margin-right: 10px;
+        }
+
+        input {
+            padding: 8px;
+            margin-right: 10px;
+        }
+
+        button {
+            padding: 8px 16px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+
+        .result {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        table {
+            width: 80%;
+            margin: 20px auto;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+
+        th {
+            background-color: #2c3e50;
+            color: white;
+        }
+
+        img {
+            max-width: 100%;
+            margin-top: 20px;
+        }
+
+        #logout-btn {
+            display: none;
+            padding: 8px 16px;
+            background-color: #e74c3c;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        #logout-btn:hover {
+            background-color: #c0392b;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>PESU Attendance Tracker</h1>
+
+    <form id="attendance-form">
+        <label for="srn">SRN:</label>
+        <input type="text" id="srn" name="srn" required>
+
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password" required>
+
+        <button type="submit">Get Attendance</button>
+    </form>
+
+    <button id="logout-btn">Logout</button>
+
+    <div class="result" id="result"></div>
+
+    <script>
+        const form = document.getElementById('attendance-form');
+        const resultDiv = document.getElementById('result');
+        const logoutBtn = document.getElementById('logout-btn');
+
+        // Save credentials in cookies
+        function setCookie(name, value, days) {
+            const date = new Date();
+            date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+            document.cookie = `${name}=${value};expires=${date.toUTCString()};path=/`;
+        }
+
+        // Get cookie by name
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+        }
+
+        // Delete cookie by name
+        function deleteCookie(name) {
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+        }
+
+        // Logout and clear cookies
+        function logout() {
+            deleteCookie('srn');
+            deleteCookie('password');
+            location.reload();
+        }
+
+        logoutBtn.addEventListener('click', logout);
+
+        // Fetch attendance from the server
+        async function fetchAttendance(srn, password) {
+            try {
+                resultDiv.innerHTML = `<p>Fetching details...</p>`;
+
+                const response = await fetch('/attendance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ srn, password })
+                });
+
+                if (!response.ok) throw new Error('Failed to fetch attendance');
+
+                const data = await response.json();
+                displayAttendance(data);
+
+                // Save credentials for auto-login next time
+                setCookie('srn', srn, 7);
+                setCookie('password', password, 7);
+
+                // Show logout button and hide form
+                form.style.display = 'none';
+                logoutBtn.style.display = 'block';
+
+            } catch (error) {
+                resultDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+
+        // Display attendance with the bunkable column
+        function displayAttendance(data) {
+            const tableHtml = `
+                <h2>Your Attendance</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Subject</th>
+                            <th>Attended</th>
+                            <th>Total</th>
+                            <th>Percentage</th>
+                            <th>Bunkable</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.attendance.map(item => `
+                            <tr>
+                                <td>${item.subject}</td>
+                                <td>${item.attended}</td>
+                                <td>${item.total}</td>
+                                <td>${item.percentage}%</td>
+                                <td>${item.bunkable >= 0 ? item.bunkable : '0'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                <h2>Attendance Graph</h2>
+                <img src="data:image/png;base64,${data.graph}" alt="Attendance Graph" />
+            `;
+
+            resultDiv.innerHTML = tableHtml;
+        }
+
+        // Handle form submission
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const srn = document.getElementById('srn').value;
+            const password = document.getElementById('password').value;
+            fetchAttendance(srn, password);
+        });
+
+        // Auto-login if credentials exist in cookies
+        window.addEventListener('load', () => {
+            const savedSRN = getCookie('srn');
+            const savedPassword = getCookie('password');
+            if (savedSRN && savedPassword) {
+                form.style.display = 'none';
+                fetchAttendance(savedSRN, savedPassword);
+            }
+        });
+    </script>
+
+</body>
+
+</html>
+
