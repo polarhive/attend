@@ -131,8 +131,13 @@ def is_valid_user(chat_id):
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    bot.reply_to(message, "Welcome to PESU Attendance Bot!\nUse /get PESU_USERNAME PESU_PASSWORD to check your attendance.")
-
+    bot.reply_to(message, (
+        "👋 *Welcome to PESU Attendance Bot!*\n"
+        "Use `/get PESU_USERNAME PESU_PASSWORD` to check your attendance.\n\n"
+        "🔒 *Privacy Notice:* \n"
+        "The bot does *not store any user data*. When you use the `/get` command, your credentials and attendance information are processed in memory and *never saved*.\n\n"
+        "✅ You can self-host or verify the source code here: https://github.com/polarhive/attend"
+    ), parse_mode="Markdown")
 
 @bot.message_handler(commands=['ping'])
 def send_pong(message):
@@ -183,8 +188,8 @@ def send_attendance_report(message):
         plt.figure(figsize=(12, 8))
 
         for i, subject in enumerate(subjects):
-            plt.bar(f"{subject}\n{attended[i]}/{total[i]}", attended[i], color='seagreen', label='Attended' if i == 0 else "")
-            plt.bar(f"{subject}\n{attended[i]}/{total[i]}", bunked[i], bottom=attended[i], color='firebrick', label='Bunked' if i == 0 else "")
+            plt.bar(subject, attended[i], color='seagreen')
+            plt.bar(subject, bunked[i], bottom=attended[i], color='firebrick')
             plt.text(i, seventy_five_marks[i] + 1, f"75%: {seventy_five_marks[i]}", ha='center', fontsize=9)
 
         plt.xlabel("Subjects")
@@ -194,13 +199,16 @@ def send_attendance_report(message):
         plt.legend(["Attended", "Bunked"])
         plt.tight_layout()
 
-        graph_path = f"data/attendance_{CHAT_ID}.png"
+        graph_path = f"data/attendance_{chat_id}.png"
         plt.savefig(graph_path)
         plt.close()
 
-        logger.info("Sending attendance graph...")
-        with open(graph_path, 'rb') as photo:
-            bot.send_photo(CHAT_ID, photo)
+        if os.path.exists(graph_path):
+            with open(graph_path, 'rb') as photo:
+                bot.send_photo(chat_id, photo)
+            os.remove(graph_path)
+        else:
+            bot.send_message(chat_id, "Error: Graph could not be generated.")
 
         bot.send_message(chat_id, response)
 
