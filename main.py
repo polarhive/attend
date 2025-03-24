@@ -1,5 +1,6 @@
 import os
 import requests
+import uvicorn
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -25,9 +26,9 @@ ACTION_TYPE = os.getenv("ACTION_TYPE", "8")
 MENU_ID = os.getenv("MENU_ID", "660")
 BUNKABLE_THRESHOLD = int(os.getenv("BUNKABLE_THRESHOLD", "75"))
 SUBJECT_MAPPING = dict(item.split(":") for item in os.getenv("SUBJECT_MAPPING", "").split(","))
+PORT = os.getenv("PORT", "8000")
 
 app = FastAPI()
-
 
 class AttendanceCalculator:
     @staticmethod
@@ -198,3 +199,6 @@ async def get_attendance(request: Request):
 async def serve_index():
     return FileResponse("index.html")
 
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
