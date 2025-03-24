@@ -53,7 +53,7 @@ WantedBy=default.target
 ```
 
 ```sh
-systemctl --user daemon-reexec
+systemctl --user daemon-reload
 systemctl --user enable pesu-attendance-bot.service --now
 ```
 
