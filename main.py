@@ -38,11 +38,11 @@ app = FastAPI()
 
 
 class PESUAttendanceScraper:
-    def __init__(self):
+    def __init__(self, username, password):
         self.session = requests.Session()
         self.base_url = "https://www.pesuacademy.com/Academy"
-        self.username = PESU_USERNAME
-        self.password = PESU_PASSWORD
+        self.username = username
+        self.password = password
 
     def get_csrf_token(self, html):
         soup = BeautifulSoup(html, 'html.parser')
@@ -52,7 +52,7 @@ class PESUAttendanceScraper:
         return csrf_input['value']
 
     def login(self):
-        logger.info("Logging into PESU Academy...")
+        logger.info(f"Logging into PESU Academy with user: {self.username}")
         login_page = f"{self.base_url}/"
         login_url = f"{self.base_url}/j_spring_security_check"
 
@@ -119,39 +119,44 @@ class PESUAttendanceScraper:
     def calculate_75_percent_mark(self, total_classes, threshold=75):
         return int((threshold / 100) * total_classes)
 
+
 @app.get('/attendance')
 def get_attendance():
     return {"status": "API is running"}
 
+
 def is_valid_user(chat_id):
     return str(chat_id) == CHAT_ID
 
+
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    logger.info("Received /start from chat_id: %s", message.chat.id)
-    if not is_valid_user(message.chat.id):
-        bot.reply_to(message, "Unauthorized user. Access denied.")
-        return
-    bot.reply_to(message, "Welcome to PESU Attendance Bot!\nUse /get to check your attendance and visualize bunkable classes.")
+    bot.reply_to(message, "Welcome to PESU Attendance Bot!\nUse /get PESU_USERNAME PESU_PASSWORD to check your attendance.")
+
 
 @bot.message_handler(commands=['ping'])
 def send_pong(message):
-    logger.info("Received /ping from chat_id: %s", message.chat.id)
-    if not is_valid_user(message.chat.id):
-        bot.reply_to(message, "Unauthorized user. Access denied.")
-        return
     bot.reply_to(message, "Pong!")
+
 
 @bot.message_handler(commands=['get'])
 def send_attendance_report(message):
-    if not is_valid_user(message.chat.id):
-        bot.reply_to(message, "Unauthorized user. Access denied.")
-        return
+    chat_id = str(message.chat.id)
+
+    if chat_id == CHAT_ID:
+        username = PESU_USERNAME
+        password = PESU_PASSWORD
+    else:
+        try:
+            _, username, password = message.text.split(" ", 2)
+        except ValueError:
+            bot.reply_to(message, "Invalid format. Use: /get PESU_USERNAME PESU_PASSWORD")
+            return
 
     bot.reply_to(message, "Fetching data...")
 
     try:
-        scraper = PESUAttendanceScraper()
+        scraper = PESUAttendanceScraper(username, password)
         scraper.login()
         data = scraper.fetch_attendance()
         scraper.logout()
@@ -197,23 +202,27 @@ def send_attendance_report(message):
         with open(graph_path, 'rb') as photo:
             bot.send_photo(CHAT_ID, photo)
 
-        bot.send_message(CHAT_ID, response)
+        bot.send_message(chat_id, response)
 
     except Exception as e:
-        logger.error("Error occurred: %s", e)
+        logger.error(f"Error occurred: {e}")
         bot.reply_to(message, f"Error: {str(e)}")
+
 
 def start_fastapi():
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
+
 def restart_bot():
     logger.error("Restarting bot...")
     os.execv(sys.executable, ['python'] + sys.argv)
 
+
 def shutdown_handler(sig, frame):
     logger.info("Shutting down bot gracefully...")
     sys.exit(0)
+
 
 signal.signal(signal.SIGINT, shutdown_handler)
 signal.signal(signal.SIGTERM, shutdown_handler)
@@ -225,5 +234,5 @@ if __name__ == '__main__':
         try:
             bot.polling(none_stop=True, long_polling_timeout=60)
         except Exception as e:
-            logger.error("Bot crashed with error: %s", e)
+            logger.error(f"Bot crashed with error: {e}")
             restart_bot()
