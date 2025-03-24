@@ -11,6 +11,18 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+### Hosting
+
+    Healthcheck:
+    Visit http://localhost:3000/healthcheck in your browser or use a tool like curl/postman. It should return Pong!.
+
+    Redirect:
+    Visit http://localhost:3000/ and you will be redirected to your Telegram bot (make sure your TELEGRAM_BOT_USERNAME env variable is set).
+
+    Attendance API:
+    The attendance API remains at http://localhost:8000/attendance.
+
+
 ## Usage
 
 ```sh
