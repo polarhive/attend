@@ -7,7 +7,6 @@
     <title>To attend, or not to attend</title>
 
     <style>
-        /* Reset & General Styling */
         * {
             margin: 0;
             padding: 0;
@@ -18,7 +17,7 @@
             width: 100%;
             height: 100%;
             overflow-x: hidden;
-            font-family: Arial, sans-serif;
+            font-family: sans-serif;
             background-color: #f9f9f9;
             display: flex;
             flex-direction: column;
@@ -211,7 +210,7 @@
             try {
                 resultDiv.innerHTML = `<h2>To attend, or not to attend, that is the question!</h2><p>Fetching..</p>`;
 
-                const response = await fetch('/attendance', {
+                const response = await fetch('/api/attendance', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ srn, password })

@@ -1,6 +1,6 @@
-# Attendance Bot
+# PESU Attendance Tracker
 
-A Telegram bot that retrieves attendance details from PESUAcademy and provides a daily summary.
+Fetches attendance details from PESUAcademy, provides real-time logs, and supports multiple SRN formats and mappings.
 
 ## Setup
 
@@ -11,49 +11,40 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### Hosting
+### Environment Configuration
 
-    Healthcheck:
-    Visit http://localhost:3000/healthcheck in your browser or use a tool like curl/postman. It should return Pong!.
-
-    Redirect:
-    Visit http://localhost:3000/ and you will be redirected to your Telegram bot (make sure your TELEGRAM_BOT_USERNAME env variable is set).
-
-    Attendance API:
-    The attendance API remains at http://localhost:8000/attendance.
-
-
-## Usage
+1. Copy the example environment file:
 
 ```sh
 cp .env.example .env
-# Populate .env with SRN, PASSWORD & TELEGRAM_BOT_TOKEN
+```
+
+2. Add subjects for your branch: PES2UG23CS tested so-far
+
+```
+PORT=8000
+BUNKABLE_THRESHOLD=75
+DEBUG_LEVEL=INFO
+
+# For example, for SRNs starting with "PES2UG23CS"
+PES2UG23CS_CONTROLLER_MODE=6407
+PES2UG23CS_ACTION_TYPE=8
+PES2UG23CS_MENU_ID=660
+PES2UG23CS_SUBJECT_MAPPING=UE23CS241B:DAA,UE23CS242B:OS,UE23CS251B:MPCA,UE23CS252B:CN,UE23MA241B:LA,UZ23UZ221B:CIE
+
+# For example, for SRNs starting with "PES2UG23AM"
+PES2UG23AM_CONTROLLER_MODE=?
+PES2UG23AM_ACTION_TYPE=?
+PES2UG23AM_MENU_ID=?
+PES2UG23AM_SUBJECT_MAPPING=UE23CS241B:DAA,UE23CS242B:OS,UE23CS251B:MPCA,UE23CS252B:CN,UE23MA241B:LA,UZ23UZ221B:CIE
+```
+
+## Running the Application
+
+```sh
 python main.py
 ```
 
-### Hosting the Backend (VPS/Render/etc.)
+## Contributions
 
-Create a systemd service file at `~/.config/systemd/user/pesu-attendance-bot.service`:
-
-```
-[Unit]
-Description=PESU Attendance Bot
-After=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=/home/user/.local/repos/atten
-ExecStart=/home/user/.local/repos/atten/.venv/bin/python3 /home/user/.local/repos/atten/main.py
-Restart=always
-RestartSec=5
-EnvironmentFile=/home/user/.local/repos/atten/.env
-
-[Install]
-WantedBy=default.target
-```
-
-```sh
-systemctl --user daemon-reload
-systemctl --user enable pesu-attendance-bot.service --now
-```
-
+Feel free to open issues and PRs for improvements and feature requests.
