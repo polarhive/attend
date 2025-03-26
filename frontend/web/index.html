@@ -268,7 +268,7 @@
         // Handle form submission
         form.addEventListener('submit', (e) => {
             e.preventDefault();
-            const srn = document.getElementById('srn').value;
+            const srn = document.getElementById('srn').value.trim().toLowerCase();
             const password = document.getElementById('password').value;
             fetchAttendance(srn, password);
         });

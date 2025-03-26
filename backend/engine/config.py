@@ -12,6 +12,7 @@ def parse_subject_mapping(mapping_str: str) -> dict:
 
 def get_branch_config(srn: str) -> dict:
     # First 9 characters, e.g. "PES2UG23CS"
+    srn = srn.upper()
     match = re.match(r"^(PES\d+[A-Z]+\d+[A-Z]{2})", srn)
     if not match:
         raise ValueError("Invalid SRN format: branch prefix not found")
