@@ -17,10 +17,13 @@ def get_branch_config(srn: str) -> dict:
         raise ValueError("Invalid SRN format: branch prefix not found")
     branch_prefix = match.group(1)
     
-    controller_mode = os.getenv(f"{branch_prefix}_CONTROLLER_MODE")
-    action_type = os.getenv(f"{branch_prefix}_ACTION_TYPE")
-    menu_id = os.getenv(f"{branch_prefix}_MENU_ID")
-    subject_mapping_str = os.getenv(f"{branch_prefix}_SUBJECT_MAPPING")
+    controller_mode = os.getenv(f"CONTROLLER_MODE", "6407")
+    action_type = os.getenv(f"ACTION_TYPE", "8")
+    menu_id = os.getenv(f"MENU_ID", "660")
+
+    # stuff that changes based on branch
+    batchClassId = os.getenv(f"{branch_prefix}_BATCH_CLASS_ID", "")
+    subject_mapping_str = os.getenv(f"{branch_prefix}_SUBJECT_MAPPING", "")
 
     if not all([controller_mode, action_type, menu_id, subject_mapping_str]):
         raise ValueError(f"Missing branch-specific configuration for {branch_prefix}")
@@ -29,5 +32,6 @@ def get_branch_config(srn: str) -> dict:
         "controller_mode": controller_mode,
         "action_type": action_type,
         "menu_id": menu_id,
+        "batchClassId": batchClassId,
         "subject_mapping": parse_subject_mapping(subject_mapping_str)
     }

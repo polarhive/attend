@@ -18,6 +18,7 @@ class PESUAttendanceScraper:
         config = get_branch_config(username)
         self.controller_mode = config["controller_mode"]
         self.action_type = config["action_type"]
+        self.batchClassId = config["batchClassId"]
         self.menu_id = config["menu_id"]
         self.subject_mapping = config["subject_mapping"]
 
@@ -56,8 +57,8 @@ class PESUAttendanceScraper:
         payload = {
             'controllerMode': self.controller_mode,
             'actionType': self.action_type,
-            'batchClassId': os.getenv("BATCH_CLASS_ID", "2660"),
             'menuId': self.menu_id,
+            'batchClassId': self.batchClassId,
             '_csrf': csrf_token
         }
         response = self.session.post(attendance_url, data=payload)
