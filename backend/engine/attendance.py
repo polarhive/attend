@@ -7,10 +7,8 @@ class AttendanceCalculator:
         if total_classes == 0:
             return 0
 
-        max_bunkable = 0
-        while (attended_classes / (total_classes + max_bunkable)) * 100 >= threshold:
-            max_bunkable += 1
-        return max_bunkable - 1 if max_bunkable > 0 else 0
+        max_bunkable = (attended_classes * 100 // threshold) - total_classes
+        return max(0, max_bunkable)
 
     @staticmethod
     def calculate_threshold_mark(total_classes, threshold):

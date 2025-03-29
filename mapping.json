@@ -1,0 +1,39 @@
+{
+    "CONTROLLER_MODE": 6407,
+    "ACTION_TYPE": 8,
+    "MENU_ID": 660,
+    "BATCH_CLASS_ID_MAPPING": {
+        "PES1UG23AM": 2690,
+        "PES1UG23CS": 2687,
+        "PES2UG23AM": 2672,
+        "PES2UG23CS": 2660,
+        "PES2UG23EC": 2663,
+        "PES2UG24AM": [2670, 2671],
+        "PES2UG24CS": [2670, 2671],
+        "PES2UG24EC": [2670, 2671]
+    },
+    "SUBJECT_MAPPING": {
+        "UE23CS241B": "DAA",
+        "UE23CS242B": "OS",
+        "UE23CS251B": "MPCA",
+        "UE23CS252B": "CN",
+        "UE23EC251B": "DSP",
+        "UE23EC252B": "DVLSI",
+        "UE23EE241B": "CS",
+        "UE23EE242B": "EMFT",
+        "UE23MA241B": "LA",
+        "UE24CS151B (LAB)": "C LAB",
+        "UE24CS151B": "C",
+        "UE24CV141B": "Statics",
+        "UE24CY151B (LAB)": "Chem LAB",
+        "UE24CY151B": "Chem",
+        "UE24EC141B": "EPD",
+        "UE24EE141B": "EEE",
+        "UE24EV121B": "EVS",
+        "UE24MA141B": "M2",
+        "UE24ME141B": "MES",
+        "UE24PH151B": "Phy",
+        "UL24CE121B": "Constitution",
+        "UZ23UZ221B": "CIE"
+    }
+}

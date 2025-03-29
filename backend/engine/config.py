@@ -1,37 +1,32 @@
+import json
 import os
 import re
 
-def parse_subject_mapping(mapping_str: str) -> dict:
-    mapping = {}
-    if mapping_str:
-        for item in mapping_str.split(","):
-            if ":" in item:
-                key, value = item.split(":", 1)
-                mapping[key.strip()] = value.strip()
-    return mapping
+CONFIG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../mapping.json"))
+with open(CONFIG_PATH, "r") as file:
+    config_data = json.load(file)
+
+CONTROLLER_MODE = config_data["CONTROLLER_MODE"]
+ACTION_TYPE = config_data["ACTION_TYPE"]
+MENU_ID = config_data["MENU_ID"]
+BATCH_CLASS_ID_MAPPING = config_data["BATCH_CLASS_ID_MAPPING"]
+SUBJECT_MAPPING = config_data["SUBJECT_MAPPING"]
 
 def get_branch_config(srn: str) -> dict:
-    # First 9 characters, e.g. "PES2UG23CS"
-    match = re.match(r"^(PES\d+[A-Z]+\d+[A-Z]{2})", srn)
+    match = re.match(r"^(PES\d+[A-Z]{2}+\d+[A-Z]{2})", srn)
     if not match:
         raise ValueError("Invalid SRN format: branch prefix not found")
+
     branch_prefix = match.group(1)
-    
-    controller_mode = os.getenv(f"CONTROLLER_MODE", "6407")
-    action_type = os.getenv(f"ACTION_TYPE", "8")
-    menu_id = os.getenv(f"MENU_ID", "660")
+    batch_class_id = BATCH_CLASS_ID_MAPPING.get(branch_prefix)
 
-    # stuff that changes based on branch
-    batchClassId = os.getenv(f"{branch_prefix}_BATCH_CLASS_ID", "")
-    subject_mapping_str = os.getenv(f"{branch_prefix}_SUBJECT_MAPPING", "")
-
-    if not all([controller_mode, action_type, menu_id, subject_mapping_str]):
-        raise ValueError(f"Missing branch-specific configuration for {branch_prefix}")
+    if batch_class_id is None:
+        raise ValueError(f"Missing batch class ID for {branch_prefix}")
 
     return {
-        "controller_mode": controller_mode,
-        "action_type": action_type,
-        "menu_id": menu_id,
-        "batchClassId": batchClassId,
-        "subject_mapping": parse_subject_mapping(subject_mapping_str)
+        "controller_mode": CONTROLLER_MODE,
+        "action_type": ACTION_TYPE,
+        "menu_id": MENU_ID,
+        "batchClassId": batch_class_id,
+        "subject_mapping": SUBJECT_MAPPING
     }

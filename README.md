@@ -19,7 +19,7 @@ python main.py
 
 ## Additing your branch
 
-Update the `.env.example` file and open a PR
+Update the `mapping.json` file and open a PR
 
 - Log in to [PESUAcademy](https://www.pesuacademy.com/Academy/s/studentProfilePESU).
 - Open the developer tools by right-clicking on the page and selecting `Inspect Element` (Hotkey: `F12` or `CTRL+SHIFT+I`).
@@ -28,15 +28,9 @@ Update the `.env.example` file and open a PR
 - Look for a network request to `/studentProfilePESUAdmin` and click on it.
 - In the `Payload` or `Request` tab, locate the form data. 
 - - It should look like: `controllerMode=6407&actionType=8&batchClassId=2660&menuId=660`
-- - The `batchClassId` value `2660` is what you need to set in your `BATCH_CLASS_ID` environment variable.
+- - The `batchClassId` value `2660` is what you need to for your `BATCH_CLASS_ID` key
 - Define your `SUBJECT_MAPPING` in key-value pairs based on your subjects.
 
-Example `.env` configuration:
-```
-# SRNs starting with "PES2UG23CS"
-PES2UG23CS_BATCH_CLASS_ID=2660
-PES2UG23CS_SUBJECT_MAPPING=UE23CS241B:DAA,UE23CS242B:OS,UE23CS251B:MPCA,UE23CS252B:CN,UE23MA241B:LA,UZ23UZ221B:CIE
-```
 
 ## Contributions
 
