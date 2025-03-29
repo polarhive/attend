@@ -1,0 +1,219 @@
+       * {
+           margin: 0;
+           padding: 0;
+           box-sizing: border-box;
+       }
+
+       html,
+       body {
+           width: 100%;
+           height: 100%;
+           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+           background-color: #f5f5f7;
+           display: flex;
+           flex-direction: column;
+           align-items: center;
+           padding-top: 80px;
+           /* space for navbar */
+       }
+
+       /* Navbar */
+       .navbar {
+           position: fixed;
+           top: 0;
+           left: 0;
+           width: 100%;
+           background: #ffffff;
+           border-bottom: 1px solid #e0e0e0;
+           display: flex;
+           justify-content: space-between;
+           align-items: center;
+           padding: 12px 20px;
+           z-index: 1000;
+       }
+
+       #navbar-title {
+           font-size: 20px;
+           color: #333;
+       }
+
+       #logout-btn {
+           padding: 8px 16px;
+           background-color: #ff3b30;
+           color: #fff;
+           border: none;
+           border-radius: 6px;
+           cursor: pointer;
+           display: none;
+           transition: background-color 0.3s;
+       }
+
+       #logout-btn:hover {
+           background-color: #e53228;
+       }
+
+       /* Form Styling */
+       form {
+           width: 90%;
+           max-width: 400px;
+           background: #fff;
+           padding: 20px;
+           border-radius: 12px;
+           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+           margin-bottom: 20px;
+           text-align: center;
+       }
+
+       form label {
+           display: block;
+           font-size: 16px;
+           margin-bottom: 4px;
+           color: #555;
+       }
+
+       form input {
+           width: 100%;
+           padding: 12px;
+           margin-bottom: 12px;
+           border: 1px solid #ccc;
+           border-radius: 8px;
+           font-size: 16px;
+       }
+
+       form button {
+           width: 100%;
+           padding: 12px;
+           background-color: #007aff;
+           color: #fff;
+           border: none;
+           border-radius: 8px;
+           font-size: 16px;
+           cursor: pointer;
+           transition: background-color 0.3s;
+       }
+
+       form button:hover {
+           background-color: #006ae6;
+       }
+
+       /* Attendance Result Section */
+       .result {
+           width: 90%;
+           max-width: 800px;
+           margin: 20px auto;
+           text-align: center;
+       }
+
+       .result img {
+           max-width: 100%;
+           border-radius: 8px;
+           margin-bottom: 20px;
+       }
+
+       .table-container {
+           overflow-x: auto;
+           background: #fff;
+           border-radius: 8px;
+           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+       }
+
+       table {
+           width: 100%;
+           border-collapse: collapse;
+       }
+
+       table th,
+       table td {
+           padding: 12px;
+           border: 1px solid #e0e0e0;
+           font-size: 14px;
+           color: #333;
+           text-align: center;
+       }
+
+       table th {
+           background: #f0f0f0;
+       }
+
+       /* Notification Container at Top Left */
+       #notification-container {
+           position: fixed;
+           top: 10px;
+           left: 10px;
+           z-index: 1100;
+           display: flex;
+           flex-direction: column;
+           gap: 8px;
+           pointer-events: none;
+       }
+
+       .notification {
+           background-color: #007aff;
+           color: #fff;
+           padding: 10px 16px;
+           border-radius: 8px;
+           box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+           font-size: 14px;
+           max-width: 300px;
+           opacity: 0;
+           animation: fadein 0.5s forwards, fadeout 0.5s 3s forwards;
+       }
+
+       @keyframes fadein {
+           from {
+               opacity: 0;
+               transform: translateX(-20px);
+           }
+
+           to {
+               opacity: 1;
+               transform: translateX(0);
+           }
+       }
+
+       @keyframes fadeout {
+           from {
+               opacity: 1;
+           }
+
+           to {
+               opacity: 0;
+           }
+       }
+
+       /* Responsive Design */
+       @media (max-width: 600px) {
+           #navbar-title {
+               font-size: 18px;
+           }
+
+           form {
+               padding: 16px;
+           }
+
+           form input {
+               padding: 10px;
+               font-size: 14px;
+           }
+
+           form button {
+               padding: 10px;
+               font-size: 14px;
+           }
+
+           table th,
+           table td {
+               padding: 10px;
+               font-size: 12px;
+           }
+
+           #notification-container {
+               top: 5px;
+               left: 5px;
+           }
+
+           .notification {
+               max-width: 90vw;
+               font-size: 12px;
+           }
+       }

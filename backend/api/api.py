@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
-from backend.engine.fetch import PESUAttendanceScraper, fetch_attendance_with_retry
+from backend.engine.fetch import PESUAttendanceScraper
 from backend.engine.chart import generate_graph
 from backend.engine.attendance import AttendanceCalculator
 
@@ -26,7 +26,7 @@ async def get_attendance(request: Request):
     try:
         scraper = PESUAttendanceScraper(srn, password)
         scraper.login()
-        attendance_data = fetch_attendance_with_retry(scraper)        
+        attendance_data = PESUAttendanceScraper.fetch_attendance(scraper)        
         scraper.logout()
 
         if not attendance_data:

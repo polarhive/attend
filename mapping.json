@@ -8,9 +8,18 @@
         "PES2UG23AM": 2672,
         "PES2UG23CS": 2660,
         "PES2UG23EC": 2663,
-        "PES2UG24AM": [2670, 2671],
-        "PES2UG24CS": [2670, 2671],
-        "PES2UG24EC": [2670, 2671]
+        "PES2UG24AM": [
+            2760,
+            2761
+        ],
+        "PES2UG24CS": [
+            2760,
+            2761
+        ],
+        "PES2UG24EC": [
+            2760,
+            2761
+        ]
     },
     "SUBJECT_MAPPING": {
         "UE23CS241B": "DAA",
