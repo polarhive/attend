@@ -102,6 +102,9 @@ class PESUAttendanceScraper:
         for row in table.find('tbody').find_all('tr'):
             columns = [cell.text.strip() for cell in row.find_all('td')]
             if len(columns) >= 3:
+                if columns[2] == "NA":
+                    logging.warning(f"Skipping invalid attendance entry: {columns}")
+                    continue
                 attendance_data.append(columns)
         return attendance_data if attendance_data else None
 

@@ -34,20 +34,18 @@ async def get_attendance(request: Request):
 
         graph = generate_graph(attendance_data, BUNKABLE_THRESHOLD, scraper.subject_mapping)
 
-        formatted_attendance = [
-            {
+        formatted_attendance = []
+        for item in attendance_data:
+            attended, total = map(int, item[2].split("/"))
+            formatted_attendance.append({
                 "subject": scraper.subject_mapping.get(item[0], item[0]),
-                "attended": int(item[2].split("/")[0]),
-                "total": int(item[2].split("/")[1]),
-                "percentage": round((int(item[2].split("/")[0]) / int(item[2].split("/")[1])) * 100, 2),
+                "attended": attended,
+                "total": total,
+                "percentage": round((attended / total) * 100, 2),
                 "bunkable": AttendanceCalculator.calculate_bunkable(
-                    int(item[2].split("/")[1]),
-                    int(item[2].split("/")[0]),
-                    BUNKABLE_THRESHOLD
+                    total, attended, BUNKABLE_THRESHOLD
                 )
-            }
-            for item in attendance_data
-        ]
+            })
 
         return {
             "logs": "Attendance fetched successfully",

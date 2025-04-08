@@ -1,4 +1,4 @@
-       * {
+* {
            margin: 0;
            padding: 0;
            box-sizing: border-box;
@@ -78,6 +78,23 @@
            border: 1px solid #ccc;
            border-radius: 8px;
            font-size: 16px;
+           transition: border-color 0.3s, box-shadow 0.3s;
+       }
+
+       /* Add styling for invalid input */
+       form input.invalid {
+           border-color: #ff3b30;
+           box-shadow: 0 0 0 1px #ff3b30;
+       }
+
+       /* Disabled button style */
+       form button:disabled {
+           background-color: #cccccc;
+           cursor: not-allowed;
+       }
+
+       form button:disabled:hover {
+           background-color: #cccccc;
        }
 
        form button {

@@ -17,7 +17,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## Additing your branch
+## Adding your branch
 
 Update the `mapping.json` file and open a PR
 

@@ -13,7 +13,12 @@ BATCH_CLASS_ID_MAPPING = config_data["BATCH_CLASS_ID_MAPPING"]
 SUBJECT_MAPPING = config_data["SUBJECT_MAPPING"]
 
 def get_branch_config(srn: str) -> dict:
-    match = re.match(r"^(PES\d+[A-Z]{2}+\d+[A-Z]{2})", srn)
+    # PES1UG23: Only CS and AM departments
+    # PES1UG24: CS, AM, BT, ME, EC departments
+    # PES2UG23: CS, AM, EC departments
+    # PES2UG24: CS, AM, EC departments
+    pattern = r"^PES(1UG23(CS|AM)|1UG24(CS|AM|BT|ME|EC)|2UG23(CS|AM|EC)|2UG24(CS|AM|EC))\d{3}$"
+    match = re.match(pattern, srn)
     if not match:
         raise ValueError("Invalid SRN format: branch prefix not found")
 
