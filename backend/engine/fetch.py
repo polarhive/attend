@@ -1,9 +1,8 @@
 import os
 import json
-import logging
 import requests
 from bs4 import BeautifulSoup
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+from backend.engine.stream import app_logger
 
 with open("mapping.json", "r") as file:
     CONFIG = json.load(file)
@@ -16,6 +15,7 @@ def get_branch_config(username):
         "menu_id": CONFIG["MENU_ID"],
         "batchClassId": CONFIG["BATCH_CLASS_ID_MAPPING"].get(prefix, []),
         "subject_mapping": CONFIG["SUBJECT_MAPPING"],
+        "branch_prefix": prefix
     }
 
 class PESUAttendanceScraper:
@@ -31,6 +31,7 @@ class PESUAttendanceScraper:
         self.menu_id = config["menu_id"]
         self.batchClassId = config["batchClassId"]
         self.subject_mapping = config["subject_mapping"]
+        self.branch_prefix = config["branch_prefix"]  # Store the branch prefix
 
     def get_csrf_token(self, html):
         soup = BeautifulSoup(html, 'html.parser')
@@ -40,7 +41,7 @@ class PESUAttendanceScraper:
         return csrf_input['value']
 
     def login(self):
-        logging.info("Attempting to log in")
+        app_logger.info("Attempting to log in")
         login_page = f"{self.base_url}/"
         login_url = f"{self.base_url}/j_spring_security_check"
         response = self.session.get(login_page)
@@ -53,14 +54,13 @@ class PESUAttendanceScraper:
         login_response = self.session.post(login_url, data=payload)
         if "Invalid username or password" in login_response.text:
             raise Exception("Login failed: Invalid credentials")
-        logging.info("Login successful")
 
     def logout(self):
-        logging.info("Logging out")
         self.session.get(f"{self.base_url}/logout")
+        app_logger.info("Logged out successfully")
 
     def fetch_attendance(self):
-        logging.info(f"Fetching attendance for batchClassId: {self.batchClassId}")
+        app_logger.info(f"Fetching attendance for branch: {self.branch_prefix}")
         dashboard = self.session.get(f"{self.base_url}/s/studentProfilePESU")
         csrf_token = self.get_csrf_token(dashboard.text)
         attendance_url = f"{self.base_url}/s/studentProfilePESUAdmin"
@@ -68,7 +68,6 @@ class PESUAttendanceScraper:
         batch_ids = self.batchClassId if isinstance(self.batchClassId, list) else [self.batchClassId]
         
         for batch_id in batch_ids:
-            logging.info(f"Trying batchClassId: {batch_id}")
             payload = {
                 'controllerMode': self.controller_mode,
                 'actionType': self.action_type,
@@ -79,31 +78,30 @@ class PESUAttendanceScraper:
             response = self.session.post(attendance_url, data=payload)
             
             if response.status_code != 200:
-                logging.error(f"Failed to fetch attendance for batchClassId {batch_id}, HTTP status: {response.status_code}")
+                app_logger.error(f"Failed to fetch attendance for ID {batch_id}, HTTP status: {response.status_code}")
                 continue
             
             attendance_data = self.parse_attendance(response.text)
             if attendance_data:
-                logging.info(f"Attendance fetched successfully for batchClassId {batch_id}")
+                app_logger.info(f"Attendance fetched successfully for ID {batch_id}")
                 return attendance_data
             
-        logging.warning("Empty attendance data after trying all batchClassId options")
+        app_logger.warning("Empty attendance data after trying all batchClassId options")
         return None
 
 
     def parse_attendance(self, html):
-        logging.info("Parsing attendance data")
         soup = BeautifulSoup(html, 'html.parser')
         table = soup.find('table', {'class': 'table'})
         if not table:
-            logging.warning("Attendance table not found in the response")
+            app_logger.warning("Attendance table not found in the response")
             return None
         attendance_data = []
         for row in table.find('tbody').find_all('tr'):
             columns = [cell.text.strip() for cell in row.find_all('td')]
             if len(columns) >= 3:
                 if columns[2] == "NA":
-                    logging.warning(f"Skipping invalid attendance entry: {columns}")
+                    app_logger.warning(f"Skipping invalid attendance entry: {columns}")
                     continue
                 attendance_data.append(columns)
         return attendance_data if attendance_data else None

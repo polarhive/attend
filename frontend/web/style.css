@@ -1,236 +1,342 @@
+:root {
+    /* Color variables */
+    --primary-color: #007aff;
+    --primary-hover: #006ae6;
+    --danger-color: #ff3b30;
+    --danger-hover: #e53228;
+    --text-color: #333;
+    --text-secondary: #555;
+    --background-color: #f5f5f7;
+    --card-background: #fff;
+    --border-color: #e0e0e0;
+    --light-gray: #f0f0f0;
+    --disabled-color: #cccccc;
+    
+    /* Sizing variables */
+    --border-radius-sm: 6px;
+    --border-radius-md: 8px;
+    --border-radius-lg: 12px;
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 12px;
+    --spacing-lg: 16px;
+    --spacing-xl: 20px;
+    
+    /* Shadow variable */
+    --box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
 * {
-           margin: 0;
-           padding: 0;
-           box-sizing: border-box;
-       }
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
 
-       html,
-       body {
-           width: 100%;
-           height: 100%;
-           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
-           background-color: #f5f5f7;
-           display: flex;
-           flex-direction: column;
-           align-items: center;
-           padding-top: 80px;
-           /* space for navbar */
-       }
+html,
+body {
+    width: 100%;
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+    background-color: var(--background-color);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 80px;
+    /* space for navbar */
+}
 
-       /* Navbar */
-       .navbar {
-           position: fixed;
-           top: 0;
-           left: 0;
-           width: 100%;
-           background: #ffffff;
-           border-bottom: 1px solid #e0e0e0;
-           display: flex;
-           justify-content: space-between;
-           align-items: center;
-           padding: 12px 20px;
-           z-index: 1000;
-       }
+/* Navbar */
+.navbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: var(--card-background);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-md) var(--spacing-xl);
+    z-index: 1000;
+}
 
-       #navbar-title {
-           font-size: 20px;
-           color: #333;
-       }
+#navbar-title {
+    font-size: 20px;
+    color: var(--text-color);
+}
 
-       #logout-btn {
-           padding: 8px 16px;
-           background-color: #ff3b30;
-           color: #fff;
-           border: none;
-           border-radius: 6px;
-           cursor: pointer;
-           display: none;
-           transition: background-color 0.3s;
-       }
+#logout-btn {
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background-color: var(--danger-color);
+    color: var(--card-background);
+    border: none;
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    display: none;
+    transition: background-color 0.3s;
+}
 
-       #logout-btn:hover {
-           background-color: #e53228;
-       }
+#logout-btn:hover {
+    background-color: var(--danger-hover);
+}
 
-       /* Form Styling */
-       form {
-           width: 90%;
-           max-width: 400px;
-           background: #fff;
-           padding: 20px;
-           border-radius: 12px;
-           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-           margin-bottom: 20px;
-           text-align: center;
-       }
+/* Form Styling */
+form {
+    width: 90%;
+    max-width: 400px;
+    background: var(--card-background);
+    padding: var(--spacing-xl);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--box-shadow);
+    margin-bottom: var(--spacing-xl);
+    text-align: center;
+}
 
-       form label {
-           display: block;
-           font-size: 16px;
-           margin-bottom: 4px;
-           color: #555;
-       }
+form label {
+    display: block;
+    font-size: 16px;
+    margin-bottom: var(--spacing-xs);
+    color: var(--text-secondary);
+}
 
-       form input {
-           width: 100%;
-           padding: 12px;
-           margin-bottom: 12px;
-           border: 1px solid #ccc;
-           border-radius: 8px;
-           font-size: 16px;
-           transition: border-color 0.3s, box-shadow 0.3s;
-       }
+form input {
+    width: 100%;
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    font-size: 16px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
 
-       /* Add styling for invalid input */
-       form input.invalid {
-           border-color: #ff3b30;
-           box-shadow: 0 0 0 1px #ff3b30;
-       }
+/* Add styling for invalid input */
+form input.invalid {
+    border-color: var(--danger-color);
+    box-shadow: 0 0 0 1px var(--danger-color);
+}
 
-       /* Disabled button style */
-       form button:disabled {
-           background-color: #cccccc;
-           cursor: not-allowed;
-       }
+/* Disabled button style */
+form button:disabled {
+    background-color: var(--disabled-color);
+    cursor: not-allowed;
+}
 
-       form button:disabled:hover {
-           background-color: #cccccc;
-       }
+form button:disabled:hover {
+    background-color: var(--disabled-color);
+}
 
-       form button {
-           width: 100%;
-           padding: 12px;
-           background-color: #007aff;
-           color: #fff;
-           border: none;
-           border-radius: 8px;
-           font-size: 16px;
-           cursor: pointer;
-           transition: background-color 0.3s;
-       }
+form button {
+    width: 100%;
+    padding: var(--spacing-md);
+    background-color: var(--primary-color);
+    color: var(--card-background);
+    border: none;
+    border-radius: var(--border-radius-md);
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
 
-       form button:hover {
-           background-color: #006ae6;
-       }
+form button:hover {
+    background-color: var(--primary-hover);
+}
 
-       /* Attendance Result Section */
-       .result {
-           width: 90%;
-           max-width: 800px;
-           margin: 20px auto;
-           text-align: center;
-       }
+/* Attendance Result Section */
+.result {
+    width: 90%;
+    max-width: 800px;
+    margin: var(--spacing-xl) auto;
+    text-align: center;
+}
 
-       .result img {
-           max-width: 100%;
-           border-radius: 8px;
-           margin-bottom: 20px;
-       }
+.result img {
+    max-width: 100%;
+    border-radius: var(--border-radius-md);
+    margin-bottom: var(--spacing-xl);
+}
 
-       .table-container {
-           overflow-x: auto;
-           background: #fff;
-           border-radius: 8px;
-           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-       }
+.table-container {
+    overflow-x: auto;
+    background: var(--card-background);
+    border-radius: var(--border-radius-md);
+    box-shadow: var(--box-shadow);
+}
 
-       table {
-           width: 100%;
-           border-collapse: collapse;
-       }
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
 
-       table th,
-       table td {
-           padding: 12px;
-           border: 1px solid #e0e0e0;
-           font-size: 14px;
-           color: #333;
-           text-align: center;
-       }
+table th,
+table td {
+    padding: var(--spacing-md);
+    border: 1px solid var(--border-color);
+    font-size: 14px;
+    color: var(--text-color);
+    text-align: center;
+}
 
-       table th {
-           background: #f0f0f0;
-       }
+table th {
+    background: var(--light-gray);
+}
 
-       /* Notification Container at Top Left */
-       #notification-container {
-           position: fixed;
-           top: 10px;
-           left: 10px;
-           z-index: 1100;
-           display: flex;
-           flex-direction: column;
-           gap: 8px;
-           pointer-events: none;
-       }
+/* Notification Container at Top Left */
+#notification-container {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 1100;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    pointer-events: none;
+}
 
-       .notification {
-           background-color: #007aff;
-           color: #fff;
-           padding: 10px 16px;
-           border-radius: 8px;
-           box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-           font-size: 14px;
-           max-width: 300px;
-           opacity: 0;
-           animation: fadein 0.5s forwards, fadeout 0.5s 3s forwards;
-       }
+.notification {
+    background-color: var(--primary-color);
+    color: var(--card-background);
+    padding: 10px var(--spacing-lg);
+    border-radius: var(--border-radius-md);
+    box-shadow: var(--box-shadow);
+    font-size: 14px;
+    max-width: 300px;
+    opacity: 0;
+    animation: fadein 0.5s forwards, fadeout 0.5s 3s forwards;
+}
 
-       @keyframes fadein {
-           from {
-               opacity: 0;
-               transform: translateX(-20px);
-           }
+@keyframes fadein {
+    from {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
 
-           to {
-               opacity: 1;
-               transform: translateX(0);
-           }
-       }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
 
-       @keyframes fadeout {
-           from {
-               opacity: 1;
-           }
+@keyframes fadeout {
+    from {
+        opacity: 1;
+    }
 
-           to {
-               opacity: 0;
-           }
-       }
+    to {
+        opacity: 0;
+    }
+}
 
-       /* Responsive Design */
-       @media (max-width: 600px) {
-           #navbar-title {
-               font-size: 18px;
-           }
+/* Loading Animation */
+.loading-container {
+    display: none;
+    width: 90%;
+    max-width: 800px;
+    margin: var(--spacing-xl) auto;
+    text-align: center;
+    background: var(--card-background);
+    padding: var(--spacing-xl);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--box-shadow);
+}
 
-           form {
-               padding: 16px;
-           }
+.loading-text {
+    font-size: 18px;
+    color: var(--text-color);
+    margin-bottom: var(--spacing-xl);
+}
 
-           form input {
-               padding: 10px;
-               font-size: 14px;
-           }
+.loading-dots {
+    display: flex;
+    justify-content: center;
+    gap: var(--spacing-sm);
+}
 
-           form button {
-               padding: 10px;
-               font-size: 14px;
-           }
+.loading-dot {
+    width: 12px;
+    height: 12px;
+    background-color: var(--primary-color);
+    border-radius: 50%;
+    opacity: 0.3;
+}
 
-           table th,
-           table td {
-               padding: 10px;
-               font-size: 12px;
-           }
+.loading-dot:nth-child(1) {
+    animation: boil 1.4s infinite 0.0s;
+}
 
-           #notification-container {
-               top: 5px;
-               left: 5px;
-           }
+.loading-dot:nth-child(2) {
+    animation: boil 1.4s infinite 0.2s;
+}
 
-           .notification {
-               max-width: 90vw;
-               font-size: 12px;
-           }
-       }
+.loading-dot:nth-child(3) {
+    animation: boil 1.4s infinite 0.4s;
+}
+
+.loading-dot:nth-child(4) {
+    animation: boil 1.4s infinite 0.6s;
+}
+
+.loading-dot:nth-child(5) {
+    animation: boil 1.4s infinite 0.8s;
+}
+
+@keyframes boil {
+    0%, 100% {
+        transform: translateY(0);
+        opacity: 0.3;
+    }
+    50% {
+        transform: translateY(-10px);
+        opacity: 1;
+    }
+}
+
+/* When loading is active, hide results and dim form */
+body.loading form {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+body.loading #result {
+    display: none;
+}
+
+body.loading .loading-container {
+    display: block;
+}
+
+/* Responsive Design */
+@media (max-width: 600px) {
+    #navbar-title {
+        font-size: 18px;
+    }
+
+    form {
+        padding: var(--spacing-lg);
+    }
+
+    form input {
+        padding: 10px;
+        font-size: 14px;
+    }
+
+    form button {
+        padding: 10px;
+        font-size: 14px;
+    }
+
+    table th,
+    table td {
+        padding: 10px;
+        font-size: 12px;
+    }
+
+    #notification-container {
+        top: 5px;
+        left: 5px;
+    }
+
+    .notification {
+        max-width: 90vw;
+        font-size: 12px;
+    }
+}

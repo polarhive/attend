@@ -6,7 +6,6 @@ from io import BytesIO
 from backend.engine.attendance import AttendanceCalculator
 
 def generate_graph(attendance_data, threshold, subject_mapping: dict):
-    logging.info("Generating attendance graph")
     subjects, attended, total, skipped, threshold_marks = [], [], [], [], []
 
     for item in attendance_data:

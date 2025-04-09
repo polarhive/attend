@@ -11,6 +11,7 @@ dotenv==0.9.9
 fastapi==0.115.12
 fonttools==4.56.0
 h11==0.14.0
+httptools==0.6.4
 idna==3.10
 kiwisolver==1.4.8
 matplotlib==3.10.1
@@ -22,6 +23,7 @@ pydantic_core==2.27.2
 pyparsing==3.2.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
+PyYAML==6.0.2
 requests==2.32.3
 six==1.17.0
 sniffio==1.3.1
@@ -31,3 +33,6 @@ starlette==0.46.1
 typing_extensions==4.12.2
 urllib3==2.3.0
 uvicorn==0.34.0
+uvloop==0.21.0
+watchfiles==1.0.5
+websockets==15.0.1
