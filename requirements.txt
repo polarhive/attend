@@ -10,7 +10,7 @@ cycler==0.12.1
 dotenv==0.9.9
 fastapi==0.115.12
 fonttools==4.56.0
-h11==0.14.0
+h11==0.16.0
 httptools==0.6.4
 idna==3.10
 kiwisolver==1.4.8
