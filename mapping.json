@@ -7,7 +7,7 @@
         "PES1UG23CS": 2687,
         "PES2UG23AM": 2672,
         "PES2UG23CS": 2968,
-        "PES2UG23EC": 2663,
+        "PES2UG23EC": 2965,
         "PES1UG24AM": [
             2762,
             2763
@@ -61,6 +61,11 @@
         "UE23EE241B": "CS",
         "UE23EE242B": "EMFT",
         "UE23MA241B": "LA",
+        "UE23EC341A": "Digital Communication",
+        "UE23EC342AB5": "Embedded Systems",
+        "UE23EC343AB1": "Verification of Digital Systems",
+        "UE23EC351A": "Computer Communication Networks",
+        "UE23EC352A": "Computer Organization and Design",
         "UE24CS151B (LAB)": "C LAB",
         "UE24CS151B": "C",
         "UE24CV141B": "Statics",
