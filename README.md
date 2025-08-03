@@ -5,7 +5,7 @@ Fetches attendance details from PESUAcademy, provides real-time logs, and suppor
 ## Setup
 
 ```sh
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate  # On Windows use `venv\Scripts\activate`
 pip install --upgrade pip
 pip install -r requirements.txt
@@ -14,7 +14,7 @@ pip install -r requirements.txt
 ## Running the Application
 
 ```sh
-python main.py
+python3 main.py
 ```
 
 ## Adding your branch
