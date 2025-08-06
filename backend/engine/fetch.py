@@ -1,108 +1,256 @@
-import os
 import json
+from pathlib import Path
+from typing import Dict, List, Optional, Union, Any
+
 import requests
 from bs4 import BeautifulSoup
+
 from backend.engine.stream import app_logger
 
-with open("mapping.json", "r") as file:
-    CONFIG = json.load(file)
 
-def get_branch_config(username):
-    prefix = username[:10] 
+class ConfigurationError(Exception):
+    pass
+
+
+class AuthenticationError(Exception):
+    pass
+
+
+class AttendanceScrapingError(Exception):
+    pass
+
+
+def load_configuration() -> Dict[str, Any]:
+    try:
+        config_path = Path("mapping.json")
+        with config_path.open("r", encoding="utf-8") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        raise ConfigurationError("Configuration file 'mapping.json' not found")
+    except json.JSONDecodeError as e:
+        raise ConfigurationError(f"Invalid JSON in configuration file: {e}")
+
+
+def get_branch_configuration(username: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    branch_prefix = username[:10]
+
     return {
-        "controller_mode": CONFIG["CONTROLLER_MODE"],
-        "action_type": CONFIG["ACTION_TYPE"],
-        "menu_id": CONFIG["MENU_ID"],
-        "batchClassId": CONFIG["BATCH_CLASS_ID_MAPPING"].get(prefix, []),
-        "subject_mapping": CONFIG["SUBJECT_MAPPING"],
-        "branch_prefix": prefix
+        "controller_mode": config["CONTROLLER_MODE"],
+        "action_type": config["ACTION_TYPE"],
+        "menu_id": config["MENU_ID"],
+        "batch_class_ids": config["BATCH_CLASS_ID_MAPPING"].get(branch_prefix, []),
+        "subject_mapping": config["SUBJECT_MAPPING"],
+        "branch_prefix": branch_prefix,
     }
 
+
 class PESUAttendanceScraper:
-    def __init__(self, username, password):
+    BASE_URL = "https://www.pesuacademy.com/Academy"
+
+    def __init__(self, username: str, password: str) -> None:
+        """
+        Initialize the scraper with credentials and configuration.
+
+        Args:
+            username (str): Student username for authentication.
+            password (str): Student password for authentication.
+
+        Raises:
+            ConfigurationError: If configuration cannot be loaded.
+        """
         self.session = requests.Session()
-        self.base_url = "https://www.pesuacademy.com/Academy"
         self.username = username
         self.password = password
 
-        config = get_branch_config(username)
-        self.controller_mode = config["controller_mode"]
-        self.action_type = config["action_type"]
-        self.menu_id = config["menu_id"]
-        self.batchClassId = config["batchClassId"]
-        self.subject_mapping = config["subject_mapping"]
-        self.branch_prefix = config["branch_prefix"]  # Store the branch prefix
+        # Load and configure branch-specific settings
+        config = load_configuration()
+        branch_config = get_branch_configuration(username, config)
 
-    def get_csrf_token(self, html):
-        soup = BeautifulSoup(html, 'html.parser')
-        csrf_input = soup.find('input', {'name': '_csrf'})
-        if not csrf_input:
-            raise Exception("CSRF token not found")
-        return csrf_input['value']
+        self.controller_mode = branch_config["controller_mode"]
+        self.action_type = branch_config["action_type"]
+        self.menu_id = branch_config["menu_id"]
+        self.batch_class_ids = branch_config["batch_class_ids"]
+        self.subject_mapping = branch_config["subject_mapping"]
+        self.branch_prefix = branch_config["branch_prefix"]
 
-    def login(self):
-        app_logger.info("Attempting to log in")
-        login_page = f"{self.base_url}/"
-        login_url = f"{self.base_url}/j_spring_security_check"
-        response = self.session.get(login_page)
-        csrf_token = self.get_csrf_token(response.text)
-        payload = {
-            'j_username': self.username,
-            'j_password': self.password,
-            '_csrf': csrf_token
-        }
-        login_response = self.session.post(login_url, data=payload)
-        if "Invalid username or password" in login_response.text:
-            raise Exception("Login failed: Invalid credentials")
+    def _extract_csrf_token(self, html_content: str) -> str:
+        soup = BeautifulSoup(html_content, "html.parser")
+        csrf_input = soup.find("input", {"name": "_csrf"})
 
-    def logout(self):
-        self.session.get(f"{self.base_url}/logout")
-        app_logger.info("Logged out successfully")
+        if not csrf_input or not csrf_input.get("value"):  # type: ignore
+            raise AuthenticationError("CSRF token not found in response")
 
-    def fetch_attendance(self):
-        app_logger.info(f"Fetching attendance for branch: {self.branch_prefix}")
-        dashboard = self.session.get(f"{self.base_url}/s/studentProfilePESU")
-        csrf_token = self.get_csrf_token(dashboard.text)
-        attendance_url = f"{self.base_url}/s/studentProfilePESUAdmin"
-        
-        batch_ids = self.batchClassId if isinstance(self.batchClassId, list) else [self.batchClassId]
-        
-        for batch_id in batch_ids:
-            payload = {
-                'controllerMode': self.controller_mode,
-                'actionType': self.action_type,
-                'menuId': self.menu_id,
-                'batchClassId': batch_id,
-                '_csrf': csrf_token
+        return csrf_input.get("value")  # type: ignore
+
+    def login(self) -> None:
+        app_logger.info("Initiating authentication process")
+
+        try:
+            # Get login page and extract CSRF token
+            login_page_url = f"{self.BASE_URL}/"
+            response = self.session.get(login_page_url)
+            response.raise_for_status()
+
+            csrf_token = self._extract_csrf_token(response.text)
+
+            # Prepare and submit login credentials
+            login_url = f"{self.BASE_URL}/j_spring_security_check"
+            login_payload = {
+                "j_username": self.username,
+                "j_password": self.password,
+                "_csrf": csrf_token,
             }
-            response = self.session.post(attendance_url, data=payload)
-            
-            if response.status_code != 200:
-                app_logger.error(f"Failed to fetch attendance for ID {batch_id}, HTTP status: {response.status_code}")
-                continue
-            
-            attendance_data = self.parse_attendance(response.text)
-            if attendance_data:
-                app_logger.info(f"Attendance fetched successfully for ID {batch_id}")
-                return attendance_data
-            
-        app_logger.warning("Empty attendance data after trying all batchClassId options")
-        return None
 
+            login_response = self.session.post(login_url, data=login_payload)
+            login_response.raise_for_status()
 
-    def parse_attendance(self, html):
-        soup = BeautifulSoup(html, 'html.parser')
-        table = soup.find('table', {'class': 'table'})
-        if not table:
-            app_logger.warning("Attendance table not found in the response")
+            # Validate successful authentication
+            self._validate_authentication()
+
+            app_logger.info("Authentication successful")
+
+        except requests.RequestException as e:
+            raise AuthenticationError(f"Network error during authentication: {e}")
+        except Exception as e:
+            raise AuthenticationError(f"Authentication failed: {e}")
+
+    def _validate_authentication(self) -> None:
+        profile_url = f"{self.BASE_URL}/s/studentProfilePESU"
+
+        try:
+            # Check if we can access protected profile page without redirect
+            profile_response = self.session.get(profile_url, allow_redirects=False)
+
+            # If we get a redirect, authentication failed
+            if profile_response.status_code in (302, 301):
+                redirect_location = profile_response.headers.get("Location", "")
+                if "login" in redirect_location.lower():
+                    raise AuthenticationError(
+                        "Authentication failed: Invalid credentials"
+                    )
+
+        except requests.RequestException as e:
+            raise AuthenticationError(f"Failed to validate authentication: {e}")
+
+    def logout(self) -> None:
+        try:
+            logout_url = f"{self.BASE_URL}/logout"
+            self.session.get(logout_url)
+            app_logger.info("Session terminated successfully")
+        except requests.RequestException as e:
+            app_logger.warning(f"Error during logout: {e}")
+
+    def scrape_attendance_data(self) -> Optional[List[List[str]]]:
+        app_logger.info(
+            f"Starting attendance data scraping for branch: {self.branch_prefix}"
+        )
+
+        try:
+            # Get fresh CSRF token for attendance requests
+            dashboard_url = f"{self.BASE_URL}/s/studentProfilePESU"
+            dashboard_response = self.session.get(dashboard_url)
+            dashboard_response.raise_for_status()
+
+            csrf_token = self._extract_csrf_token(dashboard_response.text)
+
+            # Try each batch class ID until we get valid data
+            batch_ids = self._normalize_batch_ids(self.batch_class_ids)
+
+            for batch_id in batch_ids:
+                attendance_data = self._fetch_attendance_for_batch(batch_id, csrf_token)
+
+                if attendance_data:
+                    app_logger.info(
+                        f"Successfully retrieved attendance data for batch ID: {batch_id}"
+                    )
+                    return attendance_data
+
+            app_logger.warning(
+                "No attendance data found for any configured batch class ID"
+            )
             return None
-        attendance_data = []
-        for row in table.find('tbody').find_all('tr'):
-            columns = [cell.text.strip() for cell in row.find_all('td')]
-            if len(columns) >= 3:
-                if columns[2] == "NA":
-                    app_logger.warning(f"Skipping invalid attendance entry: {columns}")
-                    continue
-                attendance_data.append(columns)
-        return attendance_data if attendance_data else None
 
+        except Exception as e:
+            raise AttendanceScrapingError(f"Failed to scrape attendance data: {e}")
+
+    def _normalize_batch_ids(self, batch_ids: Union[str, List[str]]) -> List[str]:
+        return batch_ids if isinstance(batch_ids, list) else [batch_ids]
+
+    def _fetch_attendance_for_batch(
+        self, batch_id: str, csrf_token: str
+    ) -> Optional[List[List[str]]]:
+        attendance_url = f"{self.BASE_URL}/s/studentProfilePESUAdmin"
+
+        request_payload = {
+            "controllerMode": self.controller_mode,
+            "actionType": self.action_type,
+            "menuId": self.menu_id,
+            "batchClassId": batch_id,
+            "_csrf": csrf_token,
+        }
+
+        try:
+            response = self.session.post(attendance_url, data=request_payload)
+
+            if response.status_code != 200:
+                app_logger.error(
+                    f"HTTP {response.status_code} error for batch ID {batch_id}"
+                )
+                return None
+
+            return self._parse_attendance_table(response.text)
+
+        except requests.RequestException as e:
+            app_logger.error(
+                f"Network error fetching data for batch ID {batch_id}: {e}"
+            )
+            return None
+
+    def _parse_attendance_table(self, html_content: str) -> Optional[List[List[str]]]:
+        soup = BeautifulSoup(html_content, "html.parser")
+        attendance_table = soup.find("table", {"class": "table"})
+
+        if not attendance_table:
+            app_logger.warning("No attendance table found in response")
+            return None
+
+        table_body = attendance_table.find("tbody")  # type: ignore
+        if not table_body:
+            app_logger.warning("No table body found in attendance table")
+            return None
+
+        attendance_records = []
+
+        for row in table_body.find_all("tr"):  # type: ignore
+            row_data = self._extract_row_data(row)
+
+            if row_data and self._is_valid_attendance_record(row_data):
+                attendance_records.append(row_data)
+
+        return attendance_records if attendance_records else None
+
+    def _extract_row_data(self, table_row) -> List[str]:
+        return [cell.get_text(strip=True) for cell in table_row.find_all("td")]
+
+    def _is_valid_attendance_record(self, row_data: List[str]) -> bool:
+        # Check minimum required columns and exclude invalid entries
+        if len(row_data) < 3:
+            return False
+
+        # Skip records marked as "NA" (not applicable)
+        if len(row_data) > 2 and row_data[2] == "NA":
+            app_logger.debug(f"Skipping invalid attendance entry: {row_data}")
+            return False
+
+        return True
+
+
+# Convenience function for external usage
+def fetch_student_attendance(username: str, password: str) -> Optional[List[List[str]]]:
+    scraper = PESUAttendanceScraper(username, password)
+
+    try:
+        scraper.login()
+        return scraper.scrape_attendance_data()
+    finally:
+        scraper.logout()
