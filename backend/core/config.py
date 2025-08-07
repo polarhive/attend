@@ -67,6 +67,7 @@ class MappingsConfig(BaseSettings):
 class AppSettings(BaseSettings):
     PORT: int = 8000
     LOG_LEVEL: str = "INFO"
+    DEBUG: bool = False
     BUNKABLE_THRESHOLD: int = 75
     REQUEST_TIMEOUT_SECONDS: int = 5
     WEBSOCKET_PING_TIMEOUT: float = 15.0
