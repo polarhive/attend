@@ -1,3 +1,4 @@
+import re
 from typing import List, Optional, Union
 
 import requests
@@ -30,14 +31,13 @@ class PESUAttendanceScraper:
         try:
             # Load and configure branch-specific settings using new config system
             branch_config = mappings.get_branch_config(username)
-            self.controller_mode = branch_config["controller_mode"]
-            self.action_type = branch_config["action_type"]
-            self.menu_id = branch_config["menu_id"]
-            self.batch_class_ids = branch_config["batchClassId"]
-            self.subject_mapping = branch_config["subject_mapping"]
+            self.controller_mode = branch_config.controller_mode
+            self.action_type = branch_config.action_type
+            self.menu_id = branch_config.menu_id
+            self.batch_class_ids = branch_config.batchClassId
+            self.subject_mapping = branch_config.subject_mapping
 
             # Extract branch prefix from username for logging
-            import re
 
             pattern = (
                 r"^PES(1UG23(CS|AM)|1UG24(CS|AM|BT|ME|EC)|"
@@ -150,7 +150,7 @@ class PESUAttendanceScraper:
         except Exception as e:
             raise AttendanceScrapingError(f"Failed to scrape attendance data: {e}")
 
-    def _normalize_batch_ids(self, batch_ids: Union[str, List[str]]) -> List[str]:
+    def _normalize_batch_ids(self, batch_ids: Union[int, List[int]]) -> List[str]:
         if isinstance(batch_ids, list):
             return [str(bid) for bid in batch_ids]
         return [str(batch_ids)]

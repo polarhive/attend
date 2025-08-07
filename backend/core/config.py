@@ -2,6 +2,7 @@ import re
 import json
 from pathlib import Path
 from typing import Dict, List, Union, Any
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 
 
@@ -11,6 +12,14 @@ class ConfigurationError(Exception):
     pass
 
 
+class MappingsData(BaseModel):
+    controller_mode: int
+    action_type: int
+    menu_id: int
+    batchClassId: Union[int, List[int]]
+    subject_mapping: Dict[str, str]
+
+
 class MappingsConfig(BaseSettings):
     CONTROLLER_MODE: int
     ACTION_TYPE: int
@@ -18,7 +27,7 @@ class MappingsConfig(BaseSettings):
     BATCH_CLASS_ID_MAPPING: Dict[str, Union[int, List[int]]]
     SUBJECT_MAPPING: Dict[str, str]
 
-    def get_branch_config(self, srn: str) -> Dict[str, Any]:
+    def get_branch_config(self, srn: str) -> MappingsData:
         # Validate SRN format using comprehensive regex pattern
         pattern = (
             r"^PES(1UG23(CS|AM)|1UG24(CS|AM|BT|ME|EC)|"
@@ -46,13 +55,13 @@ class MappingsConfig(BaseSettings):
                 f"Available branches: {available_branches}"
             )
 
-        return {
-            "controller_mode": self.CONTROLLER_MODE,
-            "action_type": self.ACTION_TYPE,
-            "menu_id": self.MENU_ID,
-            "batchClassId": batch_class_id,
-            "subject_mapping": self.SUBJECT_MAPPING,
-        }
+        return MappingsData(
+            controller_mode=self.CONTROLLER_MODE,
+            action_type=self.ACTION_TYPE,
+            menu_id=self.MENU_ID,
+            batchClassId=batch_class_id,
+            subject_mapping=self.SUBJECT_MAPPING,
+        )
 
 
 class AppSettings(BaseSettings):
