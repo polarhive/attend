@@ -1,77 +1,53 @@
-import json
-from pathlib import Path
-from typing import Dict, List, Optional, Union, Any
+from typing import List, Optional, Union
 
 import requests
 from bs4 import BeautifulSoup
 
 from backend.engine.stream import app_logger
-
-
-class ConfigurationError(Exception):
-    pass
+from backend.core import mappings, ConfigurationError
 
 
 class AuthenticationError(Exception):
+    """Raised when authentication with PESU Academy fails."""
+
     pass
 
 
 class AttendanceScrapingError(Exception):
+    """Raised when attendance data scraping encounters an error."""
+
     pass
-
-
-def load_configuration() -> Dict[str, Any]:
-    try:
-        config_path = Path("mapping.json")
-        with config_path.open("r", encoding="utf-8") as file:
-            return json.load(file)
-    except FileNotFoundError:
-        raise ConfigurationError("Configuration file 'mapping.json' not found")
-    except json.JSONDecodeError as e:
-        raise ConfigurationError(f"Invalid JSON in configuration file: {e}")
-
-
-def get_branch_configuration(username: str, config: Dict[str, Any]) -> Dict[str, Any]:
-    branch_prefix = username[:10]
-
-    return {
-        "controller_mode": config["CONTROLLER_MODE"],
-        "action_type": config["ACTION_TYPE"],
-        "menu_id": config["MENU_ID"],
-        "batch_class_ids": config["BATCH_CLASS_ID_MAPPING"].get(branch_prefix, []),
-        "subject_mapping": config["SUBJECT_MAPPING"],
-        "branch_prefix": branch_prefix,
-    }
 
 
 class PESUAttendanceScraper:
     BASE_URL = "https://www.pesuacademy.com/Academy"
 
     def __init__(self, username: str, password: str) -> None:
-        """
-        Initialize the scraper with credentials and configuration.
-
-        Args:
-            username (str): Student username for authentication.
-            password (str): Student password for authentication.
-
-        Raises:
-            ConfigurationError: If configuration cannot be loaded.
-        """
         self.session = requests.Session()
         self.username = username
         self.password = password
 
-        # Load and configure branch-specific settings
-        config = load_configuration()
-        branch_config = get_branch_configuration(username, config)
+        try:
+            # Load and configure branch-specific settings using new config system
+            branch_config = mappings.get_branch_config(username)
+            self.controller_mode = branch_config["controller_mode"]
+            self.action_type = branch_config["action_type"]
+            self.menu_id = branch_config["menu_id"]
+            self.batch_class_ids = branch_config["batchClassId"]
+            self.subject_mapping = branch_config["subject_mapping"]
 
-        self.controller_mode = branch_config["controller_mode"]
-        self.action_type = branch_config["action_type"]
-        self.menu_id = branch_config["menu_id"]
-        self.batch_class_ids = branch_config["batch_class_ids"]
-        self.subject_mapping = branch_config["subject_mapping"]
-        self.branch_prefix = branch_config["branch_prefix"]
+            # Extract branch prefix from username for logging
+            import re
+
+            pattern = (
+                r"^PES(1UG23(CS|AM)|1UG24(CS|AM|BT|ME|EC)|"
+                r"2UG23(CS|AM|EC)|2UG24(CS|AM|EC))\d{3}$"
+            )
+            match = re.match(pattern, username)
+            self.branch_prefix = match.group(1) if match else username[:10]
+
+        except ValueError as e:
+            raise ConfigurationError(f"Configuration error: {e}")
 
     def _extract_csrf_token(self, html_content: str) -> str:
         soup = BeautifulSoup(html_content, "html.parser")
@@ -123,8 +99,8 @@ class PESUAttendanceScraper:
 
             # If we get a redirect, authentication failed
             if profile_response.status_code in (302, 301):
-                redirect_location = profile_response.headers.get("Location", "")
-                if "login" in redirect_location.lower():
+                redirect_location = profile_response.headers.get("Location")
+                if redirect_location:
                     raise AuthenticationError(
                         "Authentication failed: Invalid credentials"
                     )
@@ -161,7 +137,8 @@ class PESUAttendanceScraper:
 
                 if attendance_data:
                     app_logger.info(
-                        f"Successfully retrieved attendance data for batch ID: {batch_id}"
+                        f"Successfully retrieved attendance data for "
+                        f"batch ID: {batch_id}"
                     )
                     return attendance_data
 
@@ -174,7 +151,9 @@ class PESUAttendanceScraper:
             raise AttendanceScrapingError(f"Failed to scrape attendance data: {e}")
 
     def _normalize_batch_ids(self, batch_ids: Union[str, List[str]]) -> List[str]:
-        return batch_ids if isinstance(batch_ids, list) else [batch_ids]
+        if isinstance(batch_ids, list):
+            return [str(bid) for bid in batch_ids]
+        return [str(batch_ids)]
 
     def _fetch_attendance_for_batch(
         self, batch_id: str, csrf_token: str
