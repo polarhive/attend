@@ -8,7 +8,6 @@ from pydantic_settings import BaseSettings
 
 class ConfigurationError(Exception):
     """Raised when configuration loading or validation fails."""
-
     pass
 
 
