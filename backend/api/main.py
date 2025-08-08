@@ -1,4 +1,5 @@
 import uuid
+import json
 import time
 import asyncio
 
@@ -23,7 +24,7 @@ from backend.engine.fetch import (
 )
 from backend.engine.chart import generate_graph
 from backend.engine.attendance import AttendanceCalculator
-from backend.engine.stream import app_logger, RequestLogHandler
+from backend.engine.stream import app_logger, RequestLogHandler, request_logging_context
 from backend.core import mappings, settings
 
 
@@ -69,83 +70,85 @@ async def process_attendance_task(request_id: str) -> None:
     # Initialize scraper as None to handle edge cases
     scraper: Optional[PESUAttendanceScraper] = None
 
-    try:
-        # Retrieve request data from storage - validate existence
-        if request_id not in request_store:
-            raise AttendanceScrapingError(f"Request {request_id} not found")
+    # Ensure all logs in this task carry the request_id
+    async with request_logging_context(request_id):
+        try:
+            # Retrieve request data from storage - validate existence
+            if request_id not in request_store:
+                raise AttendanceScrapingError(f"Request {request_id} not found")
 
-        request_data = request_store[request_id]
-        srn = request_data.get("srn")
-        password = request_data.get("password")
+            request_data = request_store[request_id]
+            srn = request_data.get("srn")
+            password = request_data.get("password")
 
-        # Validate required fields exist
-        if not srn or not password:
-            raise AttendanceScrapingError("Missing SRN or password in request")
+            # Validate required fields exist
+            if not srn or not password:
+                raise AttendanceScrapingError("Missing SRN or password in request")
 
-        app_logger.info(f"Starting attendance processing for SRN: {srn[:10]}")
+            app_logger.info(f"Starting attendance processing for SRN: {srn[:10]}")
 
-        # Initialize scraper for subject mapping access
-        scraper = PESUAttendanceScraper(srn, password)
+            # Initialize scraper for subject mapping access
+            scraper = PESUAttendanceScraper(srn, password)
 
-        # Fetch attendance data using convenience function
-        attendance_data = fetch_student_attendance(srn, password)
+            # Fetch attendance data using convenience function
+            attendance_data = fetch_student_attendance(srn, password)
 
-        if not attendance_data:
-            raise AttendanceScrapingError("No attendance data retrieved")
+            if not attendance_data:
+                raise AttendanceScrapingError("No attendance data retrieved")
 
-        app_logger.info("Generating attendance visualization")
+            app_logger.info("Generating attendance visualization")
 
-        # Generate attendance graph - requires subject mapping from scraper
-        graph = generate_graph(
-            attendance_data, settings.BUNKABLE_THRESHOLD, scraper.subject_mapping
-        )
+            # Generate attendance graph - requires subject mapping from scraper
+            graph = generate_graph(
+                attendance_data, settings.BUNKABLE_THRESHOLD, scraper.subject_mapping
+            )
 
-        # Format attendance data for client consumption
-        formatted_attendance = _format_attendance_data(
-            attendance_data, scraper.subject_mapping
-        )
+            # Format attendance data for client consumption
+            formatted_attendance = _format_attendance_data(
+                attendance_data, scraper.subject_mapping
+            )
 
-        # Store successful results in request store
-        request_store[request_id].update(
-            {
-                "status": "complete",
-                "attendance": formatted_attendance,
-                "graph": graph,
-                "all_logs": log_handler.logs,
-            }
-        )
-
-        # Send results via WebSocket if connection is active
-        await _send_websocket_message(
-            request_id,
-            {
-                "type": "result",
-                "data": {
+            # Store successful results in request store
+            request_store[request_id].update(
+                {
                     "status": "complete",
                     "attendance": formatted_attendance,
                     "graph": graph,
+                    "all_logs": log_handler.logs,
+                }
+            )
+
+            # Send results via WebSocket if connection is active
+            await _send_websocket_message(
+                request_id,
+                {
+                    "type": "result",
+                    "data": {
+                        "status": "complete",
+                        "attendance": formatted_attendance,
+                        "graph": graph,
+                    },
                 },
-            },
-        )
+            )
 
-        app_logger.info("Attendance processing completed successfully")
+            app_logger.info("Attendance processing completed successfully")
 
-    except (AuthenticationError, AttendanceScrapingError) as e:
-        # Handle specific scraping errors with detailed logging
-        error_msg = f"Attendance processing error: {str(e)}"
-        await _handle_processing_error(request_id, error_msg, log_handler)
+        except (AuthenticationError, AttendanceScrapingError) as e:
+            # Handle specific scraping errors with detailed logging
+            error_msg = f"Attendance processing error: {str(e)}"
+            await _handle_processing_error(request_id, error_msg, log_handler)
 
-    except Exception as e:
-        # Handle unexpected errors with comprehensive logging
-        error_msg = f"Unexpected error during processing: {str(e)}"
-        await _handle_processing_error(request_id, error_msg, log_handler)
+        except Exception as e:
+            # Handle unexpected errors with comprehensive logging
+            error_msg = f"Unexpected error during processing: {str(e)}"
+            await _handle_processing_error(request_id, error_msg, log_handler)
 
-    finally:
-        # Clean up logging handler to prevent memory leaks
-        app_logger.removeHandler(log_handler)
+        finally:
+            # Clean up logging handler to prevent memory leaks
+            app_logger.removeHandler(log_handler)
 
-        # Perform periodic cleanup of old requests
-        _cleanup_old_requests()
+            # Perform periodic cleanup of old requests
+            _cleanup_old_requests()
 
 
 def _format_attendance_data(
@@ -330,9 +333,17 @@ async def _maintain_websocket_connection(websocket: WebSocket) -> None:
                 websocket.receive_text(), timeout=settings.WEBSOCKET_PING_TIMEOUT
             )
 
-            # Handle client ping messages
+            # Handle client ping messages (support both raw and JSON)
             if message == "ping":
                 await websocket.send_json({"type": "pong"})
+            else:
+                try:
+                    parsed = json.loads(message)
+                    if isinstance(parsed, dict) and parsed.get("type") == "ping":
+                        await websocket.send_json({"type": "pong"})
+                except json.JSONDecodeError:
+                    # Ignore non-JSON, non-ping messages in keepalive
+                    pass
 
         except asyncio.TimeoutError:
             # Send ping to check if client is still connected
