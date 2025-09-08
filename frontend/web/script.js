@@ -7,13 +7,12 @@ const srnInput = document.getElementById('srn');
 const submitButton = document.querySelector('#attendance-form button[type="submit"]');
 
 // Constants and Configuration
-const MAX_RECONNECT_ATTEMPTS = 3;
-const SRN_REGEX = /^PES(1UG23(CS|AM)|1UG24(CS|AM|BT|ME|EC)|2UG23(CS|AM|EC)|2UG24(CS|AM|EC))\d{3}$/;
+const SRN_REGEX = /^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC))\d{3}$/;
 
 // Global State
-let socket = null;
-let pingInterval = null;
-let reconnectAttempts = 0;
+let isProcessing = false;
+let currentAttendanceData = null; // Store current data for threshold updates
+let isOffline = false;
 
 // Create loading animation container
 const loadingContainer = document.createElement('div');
@@ -29,6 +28,12 @@ loadingContainer.innerHTML = `
     </div>
 `;
 document.body.appendChild(loadingContainer);
+
+// Create offline indicator
+const offlineIndicator = document.createElement('div');
+offlineIndicator.className = 'offline-indicator';
+offlineIndicator.textContent = 'Offline';
+document.body.appendChild(offlineIndicator);
 
 const logsDropdown = document.createElement('details');
 logsDropdown.id = 'logs-dropdown';
@@ -73,6 +78,133 @@ function clearLogs() {
     logsDropdown.open = false;
 }
 
+// Generate attendance chart using Chart.js
+function generateAttendanceChart(attendanceData, customThreshold = null) {
+    const ctx = document.getElementById('attendanceChart').getContext('2d');
+    
+    // Destroy existing chart if it exists
+    if (window.attendanceChart instanceof Chart) {
+        window.attendanceChart.destroy();
+    }
+    
+    const subjects = attendanceData.map(item => item.subject);
+    const attendedData = attendanceData.map(item => item.attended);
+    const skippedData = attendanceData.map(item => item.skipped);
+    const totalData = attendanceData.map(item => item.total);
+    
+    // Use custom threshold if provided, otherwise use the original threshold
+    const threshold = customThreshold !== null ? customThreshold : (attendanceData[0]?.threshold || 75);
+    
+    // Recalculate threshold marks based on current threshold
+    const thresholdData = totalData.map(total => Math.ceil((threshold / 100) * total));
+    
+    window.attendanceChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: subjects.map((subject, index) => 
+                `${subject}\n${attendedData[index]}/${attendedData[index] + skippedData[index]}`
+            ),
+            datasets: [
+                {
+                    label: 'Attended',
+                    data: attendedData,
+                    backgroundColor: 'rgba(46, 125, 50, 0.8)',
+                    borderColor: 'rgba(46, 125, 50, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Skipped',
+                    data: skippedData,
+                    backgroundColor: 'rgba(211, 47, 47, 0.8)',
+                    borderColor: 'rgba(211, 47, 47, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: `${threshold}% Threshold`,
+                    data: thresholdData,
+                    type: 'line',
+                    backgroundColor: 'rgba(255, 193, 7, 0.3)',
+                    borderColor: 'rgba(255, 193, 7, 1)',
+                    borderWidth: 2,
+                    fill: false,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    font: {
+                        size: 16
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'top'
+                }
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    title: {
+                        display: true,
+                        text: 'Subjects'
+                    }
+                },
+                y: {
+                    stacked: true,
+                    title: {
+                        display: true,
+                        text: 'Classes'
+                    },
+                    beginAtZero: true
+                }
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            }
+        }
+    });
+}
+
+// Update threshold and regenerate chart
+function updateThreshold(newThreshold) {
+    if (!currentAttendanceData) return;
+    
+    // Update the threshold display
+    const thresholdDisplay = document.getElementById('threshold-display');
+    if (thresholdDisplay) {
+        thresholdDisplay.textContent = `${newThreshold}%`;
+    }
+    
+    // Regenerate chart with new threshold
+    generateAttendanceChart(currentAttendanceData, newThreshold);
+    
+    // Update the table with recalculated bunkable values
+    updateBunkableValues(newThreshold);
+}
+
+// Update bunkable values in the table
+function updateBunkableValues(threshold) {
+    const tableRows = document.querySelectorAll('#attendance-table tbody tr');
+    
+    tableRows.forEach((row, index) => {
+        if (index < currentAttendanceData.length) {
+            const item = currentAttendanceData[index];
+            const newBunkable = Math.max(0, Math.floor((item.attended * 100 / threshold) - item.total));
+            const bunkableCell = row.querySelector('.bunkable-cell');
+            if (bunkableCell) {
+                bunkableCell.textContent = newBunkable;
+            }
+        }
+    });
+}
+
 // Display attendance data
 function displayAttendance(data) {
     if (!data || !data.attendance || data.attendance.length === 0) {
@@ -80,11 +212,28 @@ function displayAttendance(data) {
         return;
     }
 
-    let tableHTML = `
+    // Store data globally for threshold updates
+    currentAttendanceData = data.attendance;
+    const initialThreshold = data.attendance[0]?.threshold || 75;
+
+    // Show the navbar threshold control and set initial values
+    const navbarThreshold = document.getElementById('navbar-threshold');
+    const thresholdSlider = document.getElementById('threshold-slider');
+    const thresholdDisplay = document.getElementById('threshold-display');
+    
+    if (navbarThreshold && thresholdSlider && thresholdDisplay) {
+        navbarThreshold.style.display = 'block';
+        thresholdSlider.value = initialThreshold;
+        thresholdDisplay.textContent = `${initialThreshold}%`;
+    }
+
+    let html = `
         <h2>Attendance Graph</h2>
-        <img src="data:image/png;base64,${data.graph}" alt="Attendance Graph" />
+        <div class="chart-container">
+            <canvas id="attendanceChart" width="400" height="200"></canvas>
+        </div>
         <div class="table-container">
-            <table>
+            <table id="attendance-table">
                 <thead>
                     <tr>
                         <th>Subject</th>
@@ -98,26 +247,49 @@ function displayAttendance(data) {
     `;
 
     data.attendance.forEach(item => {
-        tableHTML += `
+        html += `
             <tr>
                 <td>${item.subject}</td>
                 <td>${item.attended}</td>
                 <td>${item.total}</td>
                 <td>${item.percentage}%</td>
-                <td>${item.bunkable}</td>
+                <td class="bunkable-cell">${item.bunkable}</td>
             </tr>
         `;
     });
 
-    tableHTML += `</tbody></table></div>`;
-    resultDiv.innerHTML = tableHTML;
+    html += `</tbody></table></div>`;
+    resultDiv.innerHTML = html;
+    
+    // Set up threshold slider event listener (use the navbar slider)
+    const navbarSlider = document.getElementById('threshold-slider');
+    if (navbarSlider) {
+        // Remove any existing event listeners to avoid duplicates
+        navbarSlider.removeEventListener('input', handleThresholdChange);
+        navbarSlider.addEventListener('input', handleThresholdChange);
+    }
+    
+    // Generate the chart after the HTML is inserted
+    generateAttendanceChart(data.attendance);
+}
+
+// Threshold change handler function
+function handleThresholdChange(e) {
+    updateThreshold(parseInt(e.target.value));
 }
 
 // Update UI based on login state
 function updateUIForLoggedInState() {
     const isLoggedIn = Auth.isLoggedIn();
+    const navbarThreshold = document.getElementById('navbar-threshold');
+    
     form.style.display = isLoggedIn ? 'none' : 'block';
     logoutBtn.style.display = isLoggedIn ? 'block' : 'none';
+    
+    // Show/hide threshold control based on login state
+    if (navbarThreshold) {
+        navbarThreshold.style.display = isLoggedIn ? 'block' : 'none';
+    }
 
     if (!isLoggedIn) {
         resultDiv.innerHTML = '';
@@ -182,26 +354,6 @@ const Auth = {
 
     isLoggedIn: () => {
         return Boolean(Auth.credentials.srn && Auth.credentials.password);
-    },
-
-    authenticate: (socket) => {
-        if (!Auth.isLoggedIn()) {
-            logMessage("No credentials available for authentication", "error");
-            return false;
-        }
-
-        // Send authentication if socket is open
-        if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({
-                type: "auth",
-                data: {
-                    srn: Auth.credentials.srn,
-                    password: Auth.credentials.password
-                }
-            }));
-            return true;
-        }
-        return false;
     }
 };
 
@@ -232,152 +384,89 @@ function checkSRNValidity() {
     }
 }
 
-// Setup WebSocket connection
-function setupWebSocket() {
-    // Close existing connection if any
-    if (socket) {
-        clearInterval(pingInterval);
-        if (socket.readyState === WebSocket.OPEN) {
-            socket.close();
-        }
-    }
-
-    // Determine WebSocket URL
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsBase = window.location.host;
-    const wsUrl = `${wsProtocol}//${wsBase}/api/ws/attendance`;
-
-    // Create new WebSocket connection
-    socket = new WebSocket(wsUrl);
-
-    socket.onopen = handleSocketOpen;
-    socket.onmessage = handleSocketMessage;
-    socket.onclose = handleSocketClose;
-    socket.onerror = handleSocketError;
-
-    return socket;
-}
-
-// WebSocket event handlers
-function handleSocketOpen() {
-    logMessage("WebSocket connection established", "info");
-    reconnectAttempts = 0;
-
-    // Authenticate if credentials exist
-    if (Auth.isLoggedIn()) {
-        // Small delay to ensure the server is ready
-        setTimeout(() => Auth.authenticate(socket), 100);
-    }
-
-    // Setup ping interval to keep connection alive
-    pingInterval = setInterval(() => {
-        if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: "ping" }));
-        }
-    }, 1000);
-}
-
-function handleSocketMessage(event) {
-    const data = JSON.parse(event.data);
-
-    switch (data.type) {
-        case "auth_success":
-            logsDropdown.open = false;
-            break;
-
-        case "log":
-            setTimeout(() => {
-                const logEntry = document.createElement('div');
-                logEntry.className = 'log-entry server-log';
-                logEntry.textContent = data.data;
-                logsContainer.appendChild(logEntry);
-
-                logsSummary.textContent = `Show Logs (${logsContainer.childElementCount})`;
-
-                // Check if this is the final log message
-                if (data.data.includes("Logged out successfully")) {
-                    logMessage("Process complete, closing connection", "info");
-                    // Close the WebSocket connection after a short delay
-                    setTimeout(() => {
-                        if (socket && socket.readyState === WebSocket.OPEN) {
-                            socket.close();
-                        }
-                    }, 500);
-                }
-            }, 10);
-            break;
-
-        case "result":
-            const resultData = data.data;
-            if (resultData.status === "complete") {
-                displayAttendance(resultData);
-                setLoadingState(false);
-                updateUIForLoggedInState();
-            }
-            break;
-
-        case "error":
-            logMessage(`Error: ${data.data}`, "error");
-            setLoadingState(false);
-            break;
-
-        case "ping":
-        case "pong":
-            break;
-
-        default:
-            console.log("Unknown message type:", data.type);
-    }
-}
-
-function handleSocketClose(event) {
-    clearInterval(pingInterval);
-
-    if (!event.wasClean && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-        // Try to reconnect
-        reconnectAttempts++;
-        logMessage(`Connection lost. Reconnecting (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`, "error");
-        setTimeout(() => setupWebSocket(), 2000);
-    } else if (!event.wasClean) {
-        logMessage("Connection lost. Please refresh the page to reconnect.", "error");
-        setLoadingState(false);
-    }
-}
-
-function handleSocketError(error) {
-    logMessage("WebSocket error. Please check your connection.", "error");
-    setLoadingState(false);
-}
-
 // Handle form submission
 async function fetchAttendance(srn, password) {
+    if (isProcessing) {
+        logMessage("Request already in progress", "error");
+        return;
+    }
+
+    // Check if offline
+    if (isOffline) {
+        logMessage("You are offline. Cannot fetch new attendance data.", "error");
+        return;
+    }
+
     try {
         clearLogs();
         setLoadingState(true);
+        isProcessing = true;
 
         // Validate SRN before sending
         if (!validateSRN(srn)) {
             logMessage("Invalid SRN format", "error");
             setLoadingState(false);
+            isProcessing = false;
             return;
         }
 
-        // Save credentials
+        logMessage("Sending request to server...", "info");
+
+        // Start timing the request
+        const requestStartTime = performance.now();
+
+        // Make HTTP request to the attendance endpoint
+        const response = await fetch('/api/attendance', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            },
+            body: JSON.stringify({
+                username: srn,
+                password: password
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        // Calculate request duration
+        const requestEndTime = performance.now();
+        const requestDuration = requestEndTime - requestStartTime;
+        
+        // Format duration for display
+        let durationText;
+        if (requestDuration >= 1000) {
+            durationText = `${(requestDuration / 1000).toFixed(1)} seconds`;
+        } else {
+            durationText = `${Math.round(requestDuration)}ms`;
+        }
+        
+        logMessage(`Attendance data received successfully in ${durationText}`, "info");
+        
+        // Save credentials and display results
         Auth.save(srn, password);
-        setupWebSocket();
+        displayAttendance(data);
         updateUIForLoggedInState();
 
     } catch (error) {
         logMessage(`Error: ${error.message}`, "error");
+        Auth.clear();
+    } finally {
         setLoadingState(false);
+        isProcessing = false;
     }
 }
 
 // Handle logout
 function logout() {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.close();
-    }
     Auth.clear();
     location.reload();
 }
@@ -401,14 +490,11 @@ form.addEventListener('submit', (e) => {
         return;
     }
 
-    // Save credentials and clean URL
-    Auth.save(srn, password);
+    // Clean URL parameters
     cleanUrlParameters();
-
-    clearLogs();
-    setLoadingState(true);
-    updateUIForLoggedInState();
-    setupWebSocket();
+    
+    // Fetch attendance data
+    fetchAttendance(srn, password);
 });
 
 // SRN input validation
@@ -423,11 +509,12 @@ window.addEventListener('load', () => {
 
     if (Auth.loadFromCookies()) {
         updateUIForLoggedInState();
-        setLoadingState(true);
-        setupWebSocket();
+        // Auto-fetch attendance if user was previously logged in
+        if (Auth.credentials.srn && Auth.credentials.password) {
+            fetchAttendance(Auth.credentials.srn, Auth.credentials.password);
+        }
     } else {
         updateUIForLoggedInState();
-        setupWebSocket();
     }
 });
 
@@ -435,3 +522,46 @@ window.addEventListener('load', () => {
 window.addEventListener('popstate', () => {
     updateUIForLoggedInState();
 });
+
+// Service Worker Registration for offline caching
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/sw.js')
+            .then(function(registration) {
+                console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                
+                // Check for service worker updates
+                registration.addEventListener('updatefound', function() {
+                    const newWorker = registration.installing;
+                    newWorker.addEventListener('statechange', function() {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            // New service worker is available, show update notification
+                            logMessage('App updated! Refresh to get the latest version.', 'info');
+                        }
+                    });
+                });
+            })
+            .catch(function(err) {
+                console.log('ServiceWorker registration failed: ', err);
+            });
+    });
+}
+
+// Online/Offline status monitoring
+window.addEventListener('online', function() {
+    isOffline = false;
+    offlineIndicator.classList.remove('show');
+    logMessage('Back online! You can fetch new attendance data.', 'info');
+});
+
+window.addEventListener('offline', function() {
+    isOffline = true;
+    offlineIndicator.classList.add('show');
+    logMessage('You are offline. App will work with cached data.', 'info');
+});
+
+// Check initial online status
+if (!navigator.onLine) {
+    isOffline = true;
+    offlineIndicator.classList.add('show');
+}
