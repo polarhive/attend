@@ -108,6 +108,23 @@ body {
     background-color: var(--danger-hover);
 }
 
+.github-link {
+    color: var(--primary-color);
+    text-decoration: none;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--border-radius-sm);
+    transition: all 0.2s ease;
+    font-weight: 500;
+    border: 1px solid var(--primary-color);
+    background-color: transparent;
+}
+
+.github-link:hover {
+    background-color: var(--primary-color);
+    color: var(--card-background);
+    text-decoration: none;
+}
+
 /* Form Styling */
 form {
     width: 90%;

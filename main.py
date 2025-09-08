@@ -79,7 +79,6 @@ class AppSettings(BaseSettings):
     PORT: int = 8000
     LOG_LEVEL: str = "INFO"
     DEBUG: bool = False
-    BUNKABLE_THRESHOLD: int = 75
     REQUEST_TIMEOUT_SECONDS: int = 5
 
     class Config:
@@ -139,29 +138,6 @@ def setup_logger(name=None, level=None, format_str=None):
 
     return logger
 
-
-# ============================================================================
-# ATTENDANCE CALCULATION
-# ============================================================================
-
-class AttendanceCalculator:
-    @staticmethod
-    def calculate_bunkable(total_classes, attended_classes, threshold):
-        """
-        Calculate the maximum number of bunkable classes given the threshold.
-        """
-        if total_classes == 0:
-            return 0
-
-        max_bunkable = (attended_classes * 100 // threshold) - total_classes
-        return max(0, max_bunkable)
-
-    @staticmethod
-    def calculate_threshold_mark(total_classes, threshold):
-        """
-        Calculate the minimum number of attended classes needed to meet the threshold.
-        """
-        return int((threshold / 100) * total_classes)
 
 
 # ============================================================================
@@ -465,50 +441,14 @@ def _format_attendance_data(
     formatted_attendance: List[Dict[str, Any]] = []
 
     for item in attendance_data:
-        try:
-            # Validate minimum required fields
-            if len(item) < 3:
-                app_logger.warning(f"Skipping incomplete record: {item}")
-                continue
-
-            # Parse attendance ratio (format: "attended/total")
-            attendance_parts = item[2].split("/")
-            if len(attendance_parts) != 2:
-                app_logger.warning(f"Invalid attendance format: {item[2]}")
-                continue
-
-            attended, total = map(int, attendance_parts)
-
-            # Calculate percentage with division by zero protection
-            percentage = round((attended / total) * 100, 2) if total > 0 else 0
-
-            # Calculate bunkable classes using the calculator
-            bunkable = AttendanceCalculator.calculate_bunkable(
-                total, attended, settings.BUNKABLE_THRESHOLD
-            )
-
-            # Calculate threshold mark and skipped classes for charting
-            threshold_mark = AttendanceCalculator.calculate_threshold_mark(
-                total, settings.BUNKABLE_THRESHOLD
-            )
-            skipped = total - attended
-
+        # Send raw data to client - let JS handle validation and calculations
+        if len(item) >= 3:  # Basic check for minimum fields
             formatted_attendance.append(
                 {
                     "subject": subject_mapping.get(item[0], item[0]),
-                    "attended": attended,
-                    "total": total,
-                    "skipped": skipped,
-                    "percentage": percentage,
-                    "bunkable": bunkable,
-                    "threshold": settings.BUNKABLE_THRESHOLD,
-                    "threshold_mark": threshold_mark,
+                    "raw_data": item[2],
                 }
             )
-
-        except (ValueError, IndexError) as e:
-            app_logger.warning(f"Skipping invalid attendance record {item}: {e}")
-            continue
 
     return formatted_attendance
 

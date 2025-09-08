@@ -176,6 +176,9 @@ function generateAttendanceChart(attendanceData, customThreshold = null) {
 function updateThreshold(newThreshold) {
     if (!currentAttendanceData) return;
     
+    // Save the new threshold to cookies
+    ThresholdManager.saveThreshold(newThreshold);
+    
     // Update the threshold display
     const thresholdDisplay = document.getElementById('threshold-display');
     if (thresholdDisplay) {
@@ -185,24 +188,73 @@ function updateThreshold(newThreshold) {
     // Regenerate chart with new threshold
     generateAttendanceChart(currentAttendanceData, newThreshold);
     
-    // Update the table with recalculated bunkable values
-    updateBunkableValues(newThreshold);
+    // Update the table with recalculated skippable values
+    updateskippableValues(newThreshold);
 }
 
-// Update bunkable values in the table
-function updateBunkableValues(threshold) {
+// Update skippable values in the table
+function updateskippableValues(threshold) {
     const tableRows = document.querySelectorAll('#attendance-table tbody tr');
     
     tableRows.forEach((row, index) => {
         if (index < currentAttendanceData.length) {
             const item = currentAttendanceData[index];
-            const newBunkable = Math.max(0, Math.floor((item.attended * 100 / threshold) - item.total));
-            const bunkableCell = row.querySelector('.bunkable-cell');
-            if (bunkableCell) {
-                bunkableCell.textContent = newBunkable;
+            const newskippable = Math.max(0, Math.floor((item.attended * 100 / threshold) - item.total));
+            const skippableCell = row.querySelector('.skippable-cell');
+            if (skippableCell) {
+                skippableCell.textContent = newskippable;
             }
         }
     });
+}
+
+// Parse raw attendance data and convert to expected format
+function parseAttendanceData(rawData) {
+    if (!rawData || !rawData.attendance) {
+        return rawData;
+    }
+
+    const threshold = ThresholdManager.getThreshold(); // Use saved threshold
+    
+    const parsedAttendance = rawData.attendance.map(item => {
+        const attendanceParts = item.raw_data.split("/");
+        
+        if (attendanceParts.length !== 2) {
+            console.warn(`Invalid attendance format: ${item.raw_data}`);
+            return {
+                subject: item.subject,
+                attended: 0,
+                total: 0,
+                skipped: 0,
+                percentage: 0,
+                skippable: 0,
+                threshold: threshold
+            };
+        }
+
+        const attended = parseInt(attendanceParts[0]);
+        const total = parseInt(attendanceParts[1]);
+        const skipped = total - attended;
+        const percentage = total > 0 ? Math.round((attended / total) * 100 * 100) / 100 : 0;
+        
+        // Calculate skippable classes (max classes can skip while staying above threshold)
+        const skippable = Math.max(0, Math.floor((attended * 100 / threshold) - total));
+
+        return {
+            subject: item.subject,
+            attended: attended,
+            total: total,
+            skipped: skipped,
+            percentage: percentage,
+            skippable: skippable,
+            threshold: threshold
+        };
+    });
+
+    return {
+        ...rawData,
+        attendance: parsedAttendance
+    };
 }
 
 // Display attendance data
@@ -212,9 +264,12 @@ function displayAttendance(data) {
         return;
     }
 
+    // Parse raw data before processing
+    const parsedData = parseAttendanceData(data);
+
     // Store data globally for threshold updates
-    currentAttendanceData = data.attendance;
-    const initialThreshold = data.attendance[0]?.threshold || 75;
+    currentAttendanceData = parsedData.attendance;
+    const initialThreshold = ThresholdManager.getThreshold(); // Get saved threshold
 
     // Show the navbar threshold control and set initial values
     const navbarThreshold = document.getElementById('navbar-threshold');
@@ -240,20 +295,20 @@ function displayAttendance(data) {
                         <th>Attended</th>
                         <th>Total</th>
                         <th>Percentage</th>
-                        <th>Bunkable</th>
+                        <th>skippable</th>
                     </tr>
                 </thead>
                 <tbody>
     `;
 
-    data.attendance.forEach(item => {
+    parsedData.attendance.forEach(item => {
         html += `
             <tr>
                 <td>${item.subject}</td>
                 <td>${item.attended}</td>
                 <td>${item.total}</td>
                 <td>${item.percentage}%</td>
-                <td class="bunkable-cell">${item.bunkable}</td>
+                <td class="skippable-cell">${item.skippable}</td>
             </tr>
         `;
     });
@@ -261,16 +316,8 @@ function displayAttendance(data) {
     html += `</tbody></table></div>`;
     resultDiv.innerHTML = html;
     
-    // Set up threshold slider event listener (use the navbar slider)
-    const navbarSlider = document.getElementById('threshold-slider');
-    if (navbarSlider) {
-        // Remove any existing event listeners to avoid duplicates
-        navbarSlider.removeEventListener('input', handleThresholdChange);
-        navbarSlider.addEventListener('input', handleThresholdChange);
-    }
-    
     // Generate the chart after the HTML is inserted
-    generateAttendanceChart(data.attendance);
+    generateAttendanceChart(parsedData.attendance);
 }
 
 // Threshold change handler function
@@ -313,6 +360,29 @@ const Cookies = {
 
     delete: (name) => {
         document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+    },
+
+    deleteAll: () => {
+        // Get all cookies and delete them
+        const cookies = document.cookie.split(";");
+        for (let cookie of cookies) {
+            const eqPos = cookie.indexOf("=");
+            const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+            if (name) {
+                Cookies.delete(name);
+            }
+        }
+    }
+};
+
+const ThresholdManager = {
+    getThreshold: () => {
+        const saved = Cookies.get('threshold');
+        return saved ? parseInt(saved) : 75;
+    },
+
+    saveThreshold: (threshold) => {
+        Cookies.set('threshold', threshold.toString(), 365);
     }
 };
 
@@ -350,6 +420,7 @@ const Auth = {
         Auth.credentials.password = null;
         Cookies.delete('srn');
         Cookies.delete('password');
+        Cookies.delete('threshold');
     },
 
     isLoggedIn: () => {
@@ -468,6 +539,7 @@ async function fetchAttendance(srn, password) {
 // Handle logout
 function logout() {
     Auth.clear();
+    Cookies.deleteAll(); // Clear all cookies
     location.reload();
 }
 
@@ -502,6 +574,12 @@ srnInput.addEventListener('input', checkSRNValidity);
 
 // Logout button
 logoutBtn.addEventListener('click', logout);
+
+// Threshold slider (global listener)
+const thresholdSlider = document.getElementById('threshold-slider');
+if (thresholdSlider) {
+    thresholdSlider.addEventListener('input', handleThresholdChange);
+}
 
 // Initialize on page load
 window.addEventListener('load', () => {

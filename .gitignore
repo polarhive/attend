@@ -6,3 +6,4 @@ __pycache__
 .uv_cache/
 data
 .vscode/
+attend.egg-info/
