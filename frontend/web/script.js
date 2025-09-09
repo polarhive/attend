@@ -199,7 +199,20 @@ function updateskippableValues(threshold) {
     tableRows.forEach((row, index) => {
         if (index < currentAttendanceData.length) {
             const item = currentAttendanceData[index];
-            const newskippable = Math.max(0, Math.floor((item.attended * 100 / threshold) - item.total));
+            let newskippable;
+            
+            if (item.total === 0) {
+                newskippable = 0;
+            } else {
+                const currentPercentage = (item.attended / item.total) * 100;
+                if (currentPercentage >= threshold) {
+                    newskippable = Math.floor((item.attended * 100 / threshold) - item.total);
+                } else {
+                    const needed = Math.ceil((threshold * item.total - 100 * item.attended) / (100 - threshold));
+                    newskippable = -needed;
+                }
+            }
+            
             const skippableCell = row.querySelector('.skippable-cell');
             if (skippableCell) {
                 skippableCell.textContent = newskippable;
@@ -238,7 +251,19 @@ function parseAttendanceData(rawData) {
         const percentage = total > 0 ? Math.round((attended / total) * 100 * 100) / 100 : 0;
         
         // Calculate skippable classes (max classes can skip while staying above threshold)
-        const skippable = Math.max(0, Math.floor((attended * 100 / threshold) - total));
+        // If negative, it shows how many classes need to be attended to reach threshold
+        let skippable;
+        if (total === 0) {
+            skippable = 0;
+        } else {
+            const currentPercentage = (attended / total) * 100;
+            if (currentPercentage >= threshold) {
+                skippable = Math.floor((attended * 100 / threshold) - total);
+            } else {
+                const needed = Math.ceil((threshold * total - 100 * attended) / (100 - threshold));
+                skippable = -needed;
+            }
+        }
 
         return {
             subject: item.subject,
@@ -295,7 +320,7 @@ function displayAttendance(data) {
                         <th>Attended</th>
                         <th>Total</th>
                         <th>Percentage</th>
-                        <th>skippable</th>
+                        <th>Skip/Need</th>
                     </tr>
                 </thead>
                 <tbody>
