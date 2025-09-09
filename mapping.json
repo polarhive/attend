@@ -3,9 +3,7 @@
     "ACTION_TYPE": 8,
     "MENU_ID": 660,
     "BATCH_CLASS_ID_MAPPING": {
-        "PES1UG23AM": 2690,
-        "PES1UG23CS": 2687,
-        "PES2UG23AM": 2672,
+        "PES2UG23AM": 2970,
         "PES2UG23CS": 2968,
         "PES2UG23EC": 2965,
         "PES2UG24CS": 2969
@@ -26,6 +24,8 @@
         "UE23CS351A": "DBMS",
         "UE23CS352A": "ML",
         "UE23EC251B": "DSP",
+        "UE23AM342AA3": "Social Computing",
+        "UE23AM342AB1": "Advanced Data Analytics",
         "UE23EC252B": "DVLSI",
         "UE23EE241B": "CS",
         "UE23EE242B": "EMFT",
