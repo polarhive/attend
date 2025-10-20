@@ -528,10 +528,15 @@ async function fetchAttendance(srn, password) {
 
         if (!response.ok) {
             const errorData = await response.json();
-            throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+            const errorMessage = errorData.error?.details || errorData.message || `HTTP error! status: ${response.status}`;
+            throw new Error(errorMessage);
         }
 
         const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.error?.details || data.message || "Unknown error from server");
+        }
         
         // Calculate request duration
         const requestEndTime = performance.now();
@@ -547,9 +552,13 @@ async function fetchAttendance(srn, password) {
         
         logMessage(`Attendance data received successfully in ${durationText}`, "info");
         
+        const attendanceData = {
+            attendance: data.data.attendance || data.data
+        };
+        
         // Save credentials and display results
         Auth.save(srn, password);
-        displayAttendance(data);
+        displayAttendance(attendanceData);
         updateUIForLoggedInState();
 
     } catch (error) {

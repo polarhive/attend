@@ -3,16 +3,45 @@ import os
 import re
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
 
 import uvicorn
 import requests
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, APIRouter, HTTPException, status
+from fastapi import FastAPI, APIRouter, HTTPException, status, Body
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
+from dataclasses import dataclass
+
+class APIResponse:
+    """Standardized API response wrapper for all clients (web, bot, CLI, etc.)"""
+    
+    @staticmethod
+    def success(data: Any, code: str = "success", message: str = "Operation successful") -> Dict[str, Any]:
+        """Return standardized success response"""
+        return {
+            "success": True,
+            "code": code,
+            "message": message,
+            "data": data,
+            "timestamp": time.time(),
+        }
+    
+    @staticmethod
+    def error(error_type: str, details: str, code: str = "error", status_code: int = 400) -> tuple[Dict[str, Any], int]:
+        """Return standardized error response with HTTP status"""
+        response = {
+            "success": False,
+            "code": code,
+            "message": f"{error_type}: {details}",
+            "error": {
+                "type": error_type,
+                "details": details,
+            },
+            "timestamp": time.time(),
+        }
+        return response, status_code
 
 
 # ============================================================================
@@ -24,7 +53,8 @@ class ConfigurationError(Exception):
     pass
 
 
-class MappingsData(BaseModel):
+@dataclass
+class MappingsData:
     controller_mode: int
     action_type: int
     menu_id: int
@@ -32,38 +62,30 @@ class MappingsData(BaseModel):
     subject_mapping: Dict[str, str]
 
 
-class MappingsConfig(BaseSettings):
-    CONTROLLER_MODE: int
-    ACTION_TYPE: int
-    MENU_ID: int
-    BATCH_CLASS_ID_MAPPING: Dict[str, Union[int, List[int]]]
-    SUBJECT_MAPPING: Dict[str, str]
+class MappingsConfig:
+    def __init__(self, config: Dict[str, Any]):
+        self.CONTROLLER_MODE = config.get("CONTROLLER_MODE")
+        self.ACTION_TYPE = config.get("ACTION_TYPE")
+        self.MENU_ID = config.get("MENU_ID")
+        self.BATCH_CLASS_ID_MAPPING = config.get("BATCH_CLASS_ID_MAPPING", {})
+        self.SUBJECT_MAPPING = config.get("SUBJECT_MAPPING", {})
 
     def get_branch_config(self, srn: str) -> MappingsData:
         # Validate SRN format using comprehensive regex pattern
-        pattern = (
-            r"^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC))\d{3}$"
-        )
+        pattern = r"^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC))\d{3}$"
         match = re.match(pattern, srn)
 
         if not match:
-            raise ValueError(
-                f"Invalid SRN format: '{srn}'. Expected format: "
-                "PES2UG[23|24][CS|AM|EC]XXX"
-            )
+            raise ValueError(f"Invalid SRN format: '{srn}'")
 
-        # Extract branch prefix from matched SRN
         branch_prefix = match.group(1)
         full_prefix = f"PES{branch_prefix}"
 
-        # Retrieve batch class ID(s) for the branch
         batch_class_id = self.BATCH_CLASS_ID_MAPPING.get(full_prefix)
-
         if batch_class_id is None:
             available_branches = list(self.BATCH_CLASS_ID_MAPPING.keys())
             raise ValueError(
-                f"Missing batch class ID for branch '{full_prefix}'. "
-                f"Available branches: {available_branches}"
+                f"Missing batch class ID for branch '{full_prefix}'. Available: {available_branches}"
             )
 
         return MappingsData(
@@ -75,16 +97,18 @@ class MappingsConfig(BaseSettings):
         )
 
 
-class AppSettings(BaseSettings):
-    PORT: int = 8000
-    LOG_LEVEL: str = "INFO"
-    DEBUG: bool = False
-    REQUEST_TIMEOUT_SECONDS: int = 5
+class AppSettings:
+    def __init__(self):
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+        except Exception:
+            pass
 
-    class Config:
-        env_file = [".env", ".env.example"]
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+        self.PORT = int(os.getenv("PORT", 8000))
+        self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+        self.DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
+        self.REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 5))
 
 
 def load_mappings_config() -> MappingsConfig:
@@ -93,12 +117,9 @@ def load_mappings_config() -> MappingsConfig:
     try:
         with config_path.open("r", encoding="utf-8") as file:
             config_data = json.load(file)
-        return MappingsConfig(**config_data)
+        return MappingsConfig(config_data)
     except FileNotFoundError:
-        raise ConfigurationError(
-            f"Configuration file not found at: {config_path}. "
-            "Please ensure mapping.json exists in the project root."
-        )
+        raise ConfigurationError(f"Configuration file not found at: {config_path}.")
     except json.JSONDecodeError as error:
         raise ConfigurationError(f"Invalid JSON format in configuration file: {error}")
     except Exception as error:
@@ -371,24 +392,8 @@ def fetch_student_attendance(username: str, password: str) -> Optional[List[List
 # API MODELS AND ROUTES
 # ============================================================================
 
-class AttendanceRequest(BaseModel):
-    """Request model for attendance data retrieval."""
-
-    username: str = Field(
-        ..., min_length=1, description="Student username/SRN in PESU format"
-    )
-    password: str = Field(
-        ..., min_length=1, description="Student password for authentication"
-    )
-
-
-class AttendanceResponse(BaseModel):
-    """Response model for attendance data."""
-
-    status: str = Field(..., description="Processing status")
-    attendance: List[Dict[str, Any]] = Field(
-        ..., description="Formatted attendance data"
-    )
+AttendanceRequest = Dict[str, Any]
+AttendanceResponse = Dict[str, Any]
 
 
 async def process_attendance_task(username: str, password: str) -> Dict[str, Any]:
@@ -476,45 +481,76 @@ router = APIRouter()
 
 
 @router.get("/healthcheck")
-async def healthcheck() -> Dict[str, str]:
-    return {"message": "Service is healthy", "status": "ok"}
+async def healthcheck() -> Dict[str, Any]:
+    return APIResponse.success(
+        data={"status": "healthy"},
+        code="healthcheck_ok",
+        message="Service is healthy and operational"
+    )
 
 
-@router.post("/attendance", response_model=AttendanceResponse)
-async def get_attendance(request: AttendanceRequest) -> AttendanceResponse:
+@router.post("/attendance")
+async def get_attendance(request: dict = Body(...)) -> dict:
     try:
         # Process attendance data
-        result = await process_attendance_task(request.username, request.password)
+        username = request.get("username")
+        password = request.get("password")
+        if not username or not password:
+            response, status_code = APIResponse.error(
+                error_type="ValidationError",
+                details="username and password are required",
+                code="missing_credentials",
+                status_code=400
+            )
+            raise HTTPException(status_code=status_code, detail=response)
 
-        return AttendanceResponse(
-            status=result["status"],
-            attendance=result["attendance"],
+        result = await process_attendance_task(username, password)
+
+        return APIResponse.success(
+            data=result,
+            code="attendance_retrieved",
+            message=f"Attendance data retrieved for {username}"
         )
 
     except ConfigurationError as error:
         app_logger.error(f"Configuration error: {error}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Configuration error: {str(error)}",
+        response, status_code = APIResponse.error(
+            error_type="ConfigurationError",
+            details=str(error),
+            code="config_error",
+            status_code=500
         )
+        raise HTTPException(status_code=status_code, detail=response)
+    
     except AuthenticationError as error:
         app_logger.warning(f"Authentication failed: {error}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {str(error)}",
+        response, status_code = APIResponse.error(
+            error_type="AuthenticationError",
+            details=str(error),
+            code="auth_failed",
+            status_code=401
         )
+        raise HTTPException(status_code=status_code, detail=response)
+    
     except AttendanceScrapingError as error:
         app_logger.error(f"Scraping error: {error}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve attendance data: {str(error)}",
+        response, status_code = APIResponse.error(
+            error_type="ScrapingError",
+            details=str(error),
+            code="scraping_failed",
+            status_code=500
         )
+        raise HTTPException(status_code=status_code, detail=response)
+    
     except Exception as error:
         app_logger.error(f"Unexpected error: {error}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An unexpected error occurred: {str(error)}",
+        response, status_code = APIResponse.error(
+            error_type="UnexpectedError",
+            details=str(error),
+            code="internal_error",
+            status_code=500
         )
+        raise HTTPException(status_code=status_code, detail=response)
 
 
 # Include API routes and mount static files

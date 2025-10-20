@@ -19,6 +19,15 @@ pip install -r requirements.txt
 python3 main.py
 ```
 
+### API
+
+```bash
+curl -X POST https://attend-q9u3.onrender.com/api/attendance \
+  -H "Content-Type: application/json" \
+  -d '{"username": "PES2UG23CS001", "password": "your_password"}'
+```
+
+
 ## Adding your branch
 
 Update the `mapping.json` file and open a PR
