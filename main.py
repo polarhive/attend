@@ -13,6 +13,9 @@ from bs4 import BeautifulSoup
 from fastapi import FastAPI, APIRouter, HTTPException, status, Body
 from fastapi.staticfiles import StaticFiles
 from dataclasses import dataclass
+import subprocess
+import atexit
+import sys
 
 class APIResponse:
     """Standardized API response wrapper for all clients (web, bot, CLI, etc.)"""
@@ -559,4 +562,42 @@ app.mount("/", StaticFiles(directory="frontend/web", html=True), name="frontend"
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=settings.DEBUG)
+    # Optionally start the Telegram bot as a separate subprocess.
+    # Set START_TELEGRAM_BOT=1 (or true) in the environment to enable.
+    bot_proc = None
+    try:
+        if os.getenv("START_TELEGRAM_BOT", "false").lower() in ("1", "true", "yes"):
+            tg_bot_path = Path(__file__).resolve().parent / "frontend" / "telegram" / "tg_bot.py"
+            if tg_bot_path.exists():
+                cmd = [sys.executable, str(tg_bot_path)]
+                # Inherit current environment so .env and other vars propagate
+                env = os.environ.copy()
+                # Start bot subprocess in its own session so signals don't immediately kill both
+                bot_proc = subprocess.Popen(cmd, env=env, start_new_session=True)
+                def _terminate_bot():
+                    try:
+                        if bot_proc and bot_proc.poll() is None:
+                            bot_proc.terminate()
+                            bot_proc.wait(timeout=5)
+                    except Exception:
+                        try:
+                            bot_proc.kill()
+                        except Exception:
+                            pass
+                atexit.register(_terminate_bot)
+                print(f"Started telegram bot subprocess (pid={bot_proc.pid})")
+            else:
+                print(f"Telegram bot file not found at: {tg_bot_path}, skipping bot start")
+
+        uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=settings.DEBUG)
+    finally:
+        # Ensure subprocess is cleaned up on exit
+        if bot_proc and bot_proc.poll() is None:
+            try:
+                bot_proc.terminate()
+                bot_proc.wait(timeout=5)
+            except Exception:
+                try:
+                    bot_proc.kill()
+                except Exception:
+                    pass
