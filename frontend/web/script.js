@@ -26,6 +26,7 @@ loadingContainer.innerHTML = `
         <div class="loading-dot"></div>
         <div class="loading-dot"></div>
     </div>
+    <div class="loading-logs" id="loading-logs"></div>
 `;
 document.body.appendChild(loadingContainer);
 
@@ -55,20 +56,50 @@ function setLoadingState(isLoading) {
     document.body.classList.toggle('loading', isLoading);
 }
 function logMessage(message, type = 'info') {
-    // Create notification
-    const notif = document.createElement('div');
-    notif.className = 'notification';
-    notif.style.backgroundColor = (type === 'error') ? 'var(--danger-color)' : 'var(--primary-color)';
-    notif.textContent = message;
-    notificationContainer.appendChild(notif);
-    setTimeout(() => notif.remove(), 3000);
+    // Create notification only for errors
+    if (type === 'error') {
+        const notif = document.createElement('div');
+        notif.className = 'notification';
+        notif.textContent = message;
+        notificationContainer.appendChild(notif);
+        setTimeout(() => notif.remove(), 3000);
+    }
 
+    // Add timestamp to log entry
+    const timestamp = new Date().toLocaleTimeString('en-US', { 
+        hour12: false, 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit' 
+    });
+    
     const logEntry = document.createElement('div');
     logEntry.className = 'log-entry';
-    logEntry.textContent = message;
-    logEntry.style.color = (type === 'error') ? 'var(--danger-color)' : 'var(--primary-color)';
+    
+    const timeSpan = document.createElement('span');
+    timeSpan.style.color = 'var(--text-tertiary)';
+    timeSpan.style.marginRight = '0.5rem';
+    timeSpan.textContent = `[${timestamp}]`;
+    
+    const messageSpan = document.createElement('span');
+    messageSpan.style.color = (type === 'error') ? 'var(--danger)' : 'var(--text-secondary)';
+    messageSpan.textContent = message;
+    
+    logEntry.appendChild(timeSpan);
+    logEntry.appendChild(messageSpan);
     logsContainer.appendChild(logEntry);
     logsSummary.textContent = `Show Logs (${logsContainer.childElementCount})`;
+    
+    // Also display on loading screen if visible
+    const loadingLogs = document.getElementById('loading-logs');
+    if (loadingLogs && document.body.classList.contains('loading')) {
+        const loadingLogEntry = document.createElement('div');
+        loadingLogEntry.className = 'loading-log-entry';
+        loadingLogEntry.innerHTML = `<span style="color: var(--text-tertiary); margin-right: 0.5rem;">[${timestamp}]</span><span style="color: ${type === 'error' ? 'var(--danger)' : 'var(--text-secondary)'}">${message}</span>`;
+        loadingLogs.appendChild(loadingLogEntry);
+        // Auto-scroll to bottom
+        loadingLogs.scrollTop = loadingLogs.scrollHeight;
+    }
 }
 
 // Clear the logs container
@@ -108,27 +139,30 @@ function generateAttendanceChart(attendanceData, customThreshold = null) {
                 {
                     label: 'Attended',
                     data: attendedData,
-                    backgroundColor: 'rgba(46, 125, 50, 0.8)',
-                    borderColor: 'rgba(46, 125, 50, 1)',
-                    borderWidth: 1
+                    backgroundColor: 'rgb(34, 197, 94)',
+                    borderColor: 'rgb(34, 197, 94)',
+                    borderWidth: 0
                 },
                 {
                     label: 'Skipped',
                     data: skippedData,
-                    backgroundColor: 'rgba(211, 47, 47, 0.8)',
-                    borderColor: 'rgba(211, 47, 47, 1)',
-                    borderWidth: 1
+                    backgroundColor: 'rgb(239, 68, 68)',
+                    borderColor: 'rgb(239, 68, 68)',
+                    borderWidth: 0
                 },
                 {
                     label: `${threshold}% Threshold`,
                     data: thresholdData,
                     type: 'line',
-                    backgroundColor: 'rgba(255, 193, 7, 0.3)',
-                    borderColor: 'rgba(255, 193, 7, 1)',
-                    borderWidth: 2,
+                    backgroundColor: 'rgba(250, 204, 21, 0.2)',
+                    borderColor: 'rgb(250, 204, 21)',
+                    borderWidth: 3,
                     fill: false,
-                    pointRadius: 4,
-                    pointHoverRadius: 6
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                    pointBackgroundColor: 'rgb(250, 204, 21)',
+                    pointBorderColor: 'rgb(250, 204, 21)',
+                    tension: 0
                 }
             ]
         },
@@ -137,14 +171,19 @@ function generateAttendanceChart(attendanceData, customThreshold = null) {
             maintainAspectRatio: false,
             plugins: {
                 title: {
-                    display: true,
-                    font: {
-                        size: 16
-                    }
+                    display: false
                 },
                 legend: {
                     display: true,
-                    position: 'top'
+                    position: 'top',
+                    labels: {
+                        color: '#ffffff',
+                        padding: 15,
+                        font: {
+                            size: 13,
+                            weight: '500'
+                        }
+                    }
                 }
             },
             scales: {
@@ -152,16 +191,46 @@ function generateAttendanceChart(attendanceData, customThreshold = null) {
                     stacked: true,
                     title: {
                         display: true,
-                        text: 'Subjects'
+                        text: 'Subjects',
+                        color: '#a1a1aa',
+                        font: {
+                            size: 12,
+                            weight: '500'
+                        }
+                    },
+                    ticks: {
+                        color: '#a1a1aa',
+                        font: {
+                            size: 11
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.05)',
+                        drawBorder: false
                     }
                 },
                 y: {
                     stacked: true,
                     title: {
                         display: true,
-                        text: 'Classes'
+                        text: 'Classes',
+                        color: '#a1a1aa',
+                        font: {
+                            size: 12,
+                            weight: '500'
+                        }
                     },
-                    beginAtZero: true
+                    beginAtZero: true,
+                    ticks: {
+                        color: '#a1a1aa',
+                        font: {
+                            size: 11
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.05)',
+                        drawBorder: false
+                    }
                 }
             },
             interaction: {
@@ -320,7 +389,7 @@ function displayAttendance(data) {
                         <th>Attended</th>
                         <th>Total</th>
                         <th>Percentage</th>
-                        <th>Skip/Need</th>
+                        <th>Skip/To-Makeup</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -497,6 +566,12 @@ async function fetchAttendance(srn, password) {
         clearLogs();
         setLoadingState(true);
         isProcessing = true;
+        
+        // Clear loading logs
+        const loadingLogs = document.getElementById('loading-logs');
+        if (loadingLogs) {
+            loadingLogs.innerHTML = '';
+        }
 
         // Validate SRN before sending
         if (!validateSRN(srn)) {
@@ -506,7 +581,9 @@ async function fetchAttendance(srn, password) {
             return;
         }
 
-        logMessage("Sending request to server...", "info");
+        logMessage(`Initiating attendance fetch for ${srn}`, "info");
+        logMessage("Validating credentials...", "info");
+        logMessage("Connecting to PESU Academy...", "info");
 
         // Start timing the request
         const requestStartTime = performance.now();
@@ -550,16 +627,21 @@ async function fetchAttendance(srn, password) {
             durationText = `${Math.round(requestDuration)}ms`;
         }
         
-        logMessage(`Attendance data received successfully in ${durationText}`, "info");
+        logMessage(`✓ Server responded in ${durationText}`, "info");
+        logMessage(`✓ Parsing attendance data...`, "info");
         
         const attendanceData = {
             attendance: data.data.attendance || data.data
         };
         
+        logMessage(`✓ Found ${attendanceData.attendance.length} subjects`, "info");
+        
         // Save credentials and display results
         Auth.save(srn, password);
+        logMessage(`✓ Rendering attendance visualization...`, "info");
         displayAttendance(attendanceData);
         updateUIForLoggedInState();
+        logMessage(`✓ All done! Attendance loaded successfully`, "info");
 
     } catch (error) {
         logMessage(`Error: ${error.message}`, "error");
