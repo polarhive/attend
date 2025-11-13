@@ -1,50 +1,5 @@
-<!DOCTYPE html>
-<html lang="en">
-
+<html>
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Track your PESU attendance with interactive charts and threshold management" />
-    <meta name="theme-color" content="#007aff" />
-    <title>Attendance Tracker</title>
-    <link rel="stylesheet" href="style.css" />
-    <link rel="manifest" href="manifest.json" />
-    <link rel="icon" href="favicon.ico" type="image/x-icon" />
-    <!-- Apple PWA meta tags -->
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Attendance" />
+    <meta http-equiv="refresh" content="0; url=https://polarhive.net/attend">
 </head>
-
-<body>
-    <!-- Navbar -->
-    <div class="navbar">
-        <h2 id="navbar-title">📊 Attend?</h2>
-        <div class="navbar-controls">
-            <div class="threshold-control" id="navbar-threshold" style="display: none;">
-                <label for="threshold-slider">Threshold: <span id="threshold-display">75%</span></label>
-                <input type="range" id="threshold-slider" min="50" max="100" value="75" step="1">
-            </div>
-            <a href="https://github.com/polarhive/attend" target="_blank" rel="noopener noreferrer" class="github-link">GitHub</a>
-            <button id="logout-btn">Logout</button>
-        </div>
-    </div>
-
-    <!-- Notification Container -->
-    <div id="notification-container"></div>
-
-    <!-- Attendance Form -->
-    <form id="attendance-form">
-        <label for="srn">SRN:</label>
-        <input type="text" id="srn" name="srn" required placeholder="Enter your SRN" />
-        <label for="password">Password:</label>
-        <input type="password" id="password" name="password" required placeholder="Enter your password" />
-        <button type="submit">Get Attendance</button>
-    </form>
-
-    <!-- Attendance Result -->
-    <div class="result" id="result"></div>
-
-    <script src="chart.min.js"></script>
-    <script src="script.js">
-    </script>
+</html>
