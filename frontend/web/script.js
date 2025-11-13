@@ -190,7 +190,7 @@ function generateAttendanceChart(attendanceData, customThreshold = null) {
                 x: {
                     stacked: true,
                     title: {
-                        display: true,
+                        display: false,
                         text: 'Subjects',
                         color: '#a1a1aa',
                         font: {
@@ -212,7 +212,7 @@ function generateAttendanceChart(attendanceData, customThreshold = null) {
                 y: {
                     stacked: true,
                     title: {
-                        display: true,
+                        display: false,
                         text: 'Classes',
                         color: '#a1a1aa',
                         font: {
@@ -377,7 +377,6 @@ function displayAttendance(data) {
     }
 
     let html = `
-        <h2>Attendance Graph</h2>
         <div class="chart-container">
             <canvas id="attendanceChart" width="400" height="200"></canvas>
         </div>
@@ -388,21 +387,32 @@ function displayAttendance(data) {
                         <th>Subject</th>
                         <th>Attended</th>
                         <th>Total</th>
-                        <th>Percentage</th>
-                        <th>Skip/To-Makeup</th>
+                        <th>Percent</th>
+                        <th>Buffer</th>
                     </tr>
                 </thead>
                 <tbody>
     `;
 
     parsedData.attendance.forEach(item => {
+        // Render skippable cell with contextual badge
+        let skippableHtml;
+        if (item.skippable > 0) {
+            skippableHtml = `<span class="skippable-skip">✔ Skip ${item.skippable}</span>`;
+        } else if (item.skippable < 0) {
+            const need = Math.abs(item.skippable);
+            skippableHtml = `<span class="skippable-need">✘ Need ${need}</span>`;
+        } else {
+            skippableHtml = '0';
+        }
+
         html += `
             <tr>
                 <td>${item.subject}</td>
                 <td>${item.attended}</td>
                 <td>${item.total}</td>
                 <td>${item.percentage}%</td>
-                <td class="skippable-cell">${item.skippable}</td>
+                <td class="skippable-cell">${skippableHtml}</td>
             </tr>
         `;
     });
@@ -430,6 +440,10 @@ function updateUIForLoggedInState() {
     // Show/hide threshold control based on login state
     if (navbarThreshold) {
         navbarThreshold.style.display = isLoggedIn ? 'block' : 'none';
+    }
+    const githubLink = document.getElementById('github-link');
+    if (githubLink) {
+        githubLink.style.display = isLoggedIn ? 'none' : 'inline-flex';
     }
 
     if (!isLoggedIn) {

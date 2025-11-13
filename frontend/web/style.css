@@ -77,36 +77,81 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-6) var(--space-6) var(--space-4);
+    padding: var(--space-2) var(--space-3);
     z-index: 1000;
     flex-wrap: nowrap;
-    gap: var(--space-4);
+    gap: var(--space-2);
+    height: 48px;
+}
+
+/* Prevent overflow: allow children to shrink, clamp title and threshold pill */
+.navbar {
+    overflow: hidden;
+}
+
+.navbar-brand,
+.navbar-controls {
+    min-width: 0; /* allow flex children to shrink */
+}
+
+#navbar-title {
+    display: inline-block;
+    max-width: 28ch;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.threshold-control {
+    max-width: 220px;
+    min-width: 0;
+    overflow: hidden;
+    align-items: center;
+}
+
+.threshold-control label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.threshold-control input[type="range"] {
+    width: 120px;
+    max-width: 50%;
+}
+
+#github-link {
+    margin-inline: 6px;
 }
 
 .navbar-brand {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-2);
     flex-shrink: 0;
 }
 
 .navbar-icon {
-    width: 28px;
-    height: 28px;
+    width: 18px;
+    height: 18px;
     color: var(--primary);
     flex-shrink: 0;
 }
 
 #navbar-title {
-    font-size: 1.5rem;
+    font-size: 1rem;
     font-weight: 700;
     color: var(--primary);
+    line-height: 1;
 }
 
 .navbar-controls {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-2);
     flex-wrap: nowrap;
     flex-shrink: 0;
 }
@@ -115,12 +160,13 @@ body {
     display: none;
     flex-direction: row;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-5);
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
     background: var(--bg-tertiary);
-    border-radius: 100px;
+    border-radius: 32px;
     border: 1px solid var(--border);
     white-space: nowrap;
+    min-height: 32px;
 }
 
 .navbar .threshold-control[style*="display: block"],
@@ -132,7 +178,7 @@ body {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    font-size: 0.813rem;
+    font-size: 0.812rem;
     font-weight: 600;
     color: var(--text-secondary);
     white-space: nowrap;
@@ -145,24 +191,53 @@ body {
 .threshold-value {
     color: var(--primary);
     font-weight: 700;
-    font-size: 1rem;
+    font-size: 0.9rem;
 }
 
 .navbar .threshold-control input[type="range"] {
-    width: 100px;
+    width: 72px;
     margin: 0;
     flex-shrink: 0;
+    height: 6px;
+    background: linear-gradient(to right, var(--danger) 0%, var(--warning) 50%, var(--success) 100%);
+    border-radius: 8px;
+}
+
+/* Compact thumb for navbar slider */
+.navbar .threshold-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: white;
+    border: 2px solid var(--primary);
+    box-shadow: none;
+}
+.navbar .threshold-control input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: white;
+    border: 2px solid var(--primary);
+    box-shadow: none;
+}
+
+/* Slightly thinner track when in navbar */
+.navbar .threshold-control input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 8px;
 }
 
 .icon-btn {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
     border: none;
     background: transparent;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-sm);
     cursor: pointer;
     transition: var(--transition-fast);
     color: var(--text-tertiary);
@@ -179,8 +254,8 @@ body {
 }
 
 .icon-btn svg {
-    width: 20px;
-    height: 20px;
+    width: 14px;
+    height: 14px;
 }
 
 
@@ -211,6 +286,12 @@ body {
 .btn-secondary svg {
     width: 18px;
     height: 18px;
+}
+
+/* Make logout icon slightly smaller than other .btn-secondary icons */
+#logout-btn svg {
+    width: 14px;
+    height: 14px;
 }
 
 /* Main Container */
@@ -497,6 +578,30 @@ table td:first-child {
 
 table tbody tr {
     transition: var(--transition-fast);
+}
+
+/* Skippable badges */
+.skippable-skip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--success);
+    font-weight: 600;
+}
+
+.skippable-need {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.skippable-need svg,
+.skippable-skip svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
 }
 
 table tbody tr:hover {
