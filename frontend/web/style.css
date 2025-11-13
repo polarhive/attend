@@ -89,17 +89,10 @@ body {
     overflow: hidden;
 }
 
+/* Allow flex children to shrink and prevent overflow */
 .navbar-brand,
 .navbar-controls {
     min-width: 0; /* allow flex children to shrink */
-}
-
-#navbar-title {
-    display: inline-block;
-    max-width: 28ch;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .threshold-control {
@@ -874,7 +867,7 @@ body.loading .loading-container {
 }
 
 /* Responsive Design */
-@media (max-width: 900px) {
+@media (max-width: 500px) {
     .container {
         width: 35rem;
         padding: var(--space-4);
@@ -906,6 +899,113 @@ body.loading .loading-container {
     table td {
         padding: var(--space-3);
         font-size: 0.813rem;
+    }
+}
+
+/* Desktop: make navbar larger and more prominent */
+@media (min-width: 500px) {
+    .navbar {
+        height: 72px;
+        padding: var(--space-4) var(--space-8);
+    }
+
+    #navbar-title {
+        font-size: 1.5rem;
+    }
+
+    .navbar-icon {
+        width: 26px;
+        height: 26px;
+    }
+
+    .icon-btn {
+        width: 44px;
+        height: 44px;
+    }
+
+    .threshold-control {
+        padding: var(--space-2) var(--space-5);
+        max-width: 260px;
+    }
+
+    .threshold-control input[type="range"] {
+        width: 140px;
+    }
+}
+
+/* Make navbar threshold pill scale with desktop header (bigger label, thicker track, larger thumb) */
+@media (min-width: 500px) {
+    /* On desktop, center the navbar title while keeping left/right controls in flow */
+    .navbar {
+        position: relative; /* ensure absolute children are positioned relative to navbar */
+    }
+
+    #navbar-title {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        margin: 0;
+        pointer-events: none; /* allow clicks to pass through to controls if overlapping */
+        text-align: center;
+        max-width: calc(100% - 320px); /* leave space for left & right controls */
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: inline-block;
+        max-width: 28ch;
+    }
+    .threshold-control {
+        padding: 10px 18px;
+        border-radius: 56px;
+        min-height: 40px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .threshold-control .threshold-label {
+        font-size: 0.95rem;
+        color: var(--text-secondary);
+    }
+
+    .threshold-control .threshold-value {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--primary);
+    }
+
+    .threshold-control input[type="range"] {
+        width: 180px;
+        height: 10px;
+        background: linear-gradient(to right, var(--danger) 0%, var(--warning) 50%, var(--success) 100%);
+        border-radius: 10px;
+    }
+
+    .threshold-control input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: white;
+        border: 3px solid var(--primary);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+        margin-top: -6px; /* visually center thumb relative to taller track */
+    }
+
+    .threshold-control input[type="range"]::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: white;
+        border: 3px solid var(--primary);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+    }
+
+    .threshold-control input[type="range"]::-webkit-slider-runnable-track {
+        height: 10px;
+        border-radius: 10px;
     }
 }
 
