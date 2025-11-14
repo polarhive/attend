@@ -1102,6 +1102,106 @@ body.loading .loading-container {
     background: var(--text-secondary);
 }
 
+/* Input Control Styles */
+.input-control {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    justify-content: center;
+}
+
+.attendance-input {
+    width: 60px;
+    padding: 0.35rem 0.5rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-align: center;
+    transition: var(--transition-fast);
+    appearance: textfield; /* Remove spinner */
+    -moz-appearance: textfield; /* Remove spinner in Firefox */
+}
+
+.attendance-input::-webkit-outer-spin-button,
+.attendance-input::-webkit-inner-spin-button {
+    -webkit-appearance: none; /* Remove spinner in Chrome/Safari */
+    margin: 0;
+}
+
+.attendance-input:hover {
+    border-color: var(--primary);
+    background: var(--bg-secondary);
+}
+
+.attendance-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.control-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.control-btn:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+}
+
+.control-btn:active {
+    transform: scale(0.95);
+}
+
+.control-btn.increment {
+    font-size: 0.875rem;
+}
+
+.control-btn.decrement {
+    font-size: 1.125rem;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 600px) {
+    .attendance-input {
+        width: 50px;
+        padding: 0.3rem 0.4rem;
+        font-size: 0.75rem;
+    }
+
+    .control-btn {
+        width: 22px;
+        height: 22px;
+        font-size: 0.875rem;
+    }
+
+    .control-btn.increment {
+        font-size: 0.75rem;
+    }
+
+    .control-btn.decrement {
+        font-size: 1rem;
+    }
+}
+
 /* Print Styles */
 @media print {
     .navbar,
@@ -1115,5 +1215,21 @@ body.loading .loading-container {
 
     .result {
         margin-top: 0;
+    }
+    
+    /* Print actual values, not inputs */
+    .input-control {
+        display: block;
+    }
+    
+    .control-btn {
+        display: none !important;
+    }
+    
+    .attendance-input {
+        border: none;
+        background: transparent;
+        padding: 0;
+        text-align: left;
     }
 }

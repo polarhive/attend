@@ -351,6 +351,121 @@ function parseAttendanceData(rawData) {
     };
 }
 
+// Attach event listeners to input controls
+function attachInputControlListeners() {
+    // Handle increment/decrement buttons
+    document.querySelectorAll('.control-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const button = e.target;
+            const type = button.dataset.type;
+            const index = parseInt(button.dataset.index);
+            const input = document.querySelector(`input[data-type="${type}"][data-index="${index}"]`);
+            
+            if (!input) return;
+            
+            let value = parseInt(input.value) || 0;
+            
+            if (button.classList.contains('increment')) {
+                value++;
+            } else if (button.classList.contains('decrement')) {
+                value = Math.max(0, value - 1);
+            }
+            
+            input.value = value;
+            recalculateRow(index);
+        });
+    });
+    
+    // Handle direct input changes
+    document.querySelectorAll('.attendance-input').forEach(input => {
+        input.addEventListener('input', (e) => {
+            const index = parseInt(e.target.dataset.index);
+            recalculateRow(index);
+        });
+        
+        input.addEventListener('blur', (e) => {
+            // Ensure value is valid on blur
+            let value = parseInt(e.target.value);
+            if (isNaN(value) || value < 0) {
+                e.target.value = 0;
+                recalculateRow(parseInt(e.target.dataset.index));
+            }
+        });
+    });
+}
+
+// Recalculate percentage and buffer for a specific row
+function recalculateRow(index) {
+    const attendedInput = document.querySelector(`input[data-type="attended"][data-index="${index}"]`);
+    const totalInput = document.querySelector(`input[data-type="total"][data-index="${index}"]`);
+    
+    if (!attendedInput || !totalInput) return;
+    
+    let attended = parseInt(attendedInput.value) || 0;
+    let total = parseInt(totalInput.value) || 0;
+    
+    // Validation: Attended cannot exceed Total
+    if (attended > total && total > 0) {
+        attended = total;
+        attendedInput.value = attended;
+    }
+    
+    // Update the data in memory
+    if (currentAttendanceData && currentAttendanceData[index]) {
+        currentAttendanceData[index].attended = attended;
+        currentAttendanceData[index].total = total;
+    }
+    
+    // Calculate percentage
+    const percentage = total > 0 ? Math.round((attended / total) * 100 * 100) / 100 : 0;
+    
+    // Get current threshold
+    const threshold = ThresholdManager.getThreshold();
+    
+    // Calculate skippable
+    let skippable;
+    if (total === 0) {
+        skippable = 0;
+    } else {
+        const currentPercentage = (attended / total) * 100;
+        if (currentPercentage >= threshold) {
+            skippable = Math.floor((attended * 100 / threshold) - total);
+        } else {
+            const needed = Math.ceil((threshold * total - 100 * attended) / (100 - threshold));
+            skippable = -needed;
+        }
+    }
+    
+    // Update the row
+    const row = document.querySelector(`tr[data-row-index="${index}"]`);
+    if (!row) return;
+    
+    const percentageCell = row.querySelector('.percentage-cell');
+    const skippableCell = row.querySelector('.skippable-cell');
+    
+    if (percentageCell) {
+        percentageCell.textContent = `${percentage}%`;
+    }
+    
+    if (skippableCell) {
+        let skippableHtml;
+        if (skippable > 0) {
+            skippableHtml = `<span class="skippable-skip">✔ Skip ${skippable}</span>`;
+        } else if (skippable < 0) {
+            const need = Math.abs(skippable);
+            skippableHtml = `<span class="skippable-need">✘ Need ${need}</span>`;
+        } else {
+            skippableHtml = '0';
+        }
+        skippableCell.innerHTML = skippableHtml;
+    }
+    
+    // Update the chart
+    if (currentAttendanceData) {
+        generateAttendanceChart(currentAttendanceData, threshold);
+    }
+}
+
 // Display attendance data
 function displayAttendance(data) {
     if (!data || !data.attendance || data.attendance.length === 0) {
@@ -394,7 +509,7 @@ function displayAttendance(data) {
                 <tbody>
     `;
 
-    parsedData.attendance.forEach(item => {
+    parsedData.attendance.forEach((item, index) => {
         // Render skippable cell with contextual badge
         let skippableHtml;
         if (item.skippable > 0) {
@@ -407,11 +522,23 @@ function displayAttendance(data) {
         }
 
         html += `
-            <tr>
+            <tr data-row-index="${index}">
                 <td>${item.subject}</td>
-                <td>${item.attended}</td>
-                <td>${item.total}</td>
-                <td>${item.percentage}%</td>
+                <td>
+                    <div class="input-control">
+                        <button class="control-btn decrement" data-type="attended" data-index="${index}">−</button>
+                        <input type="number" class="attendance-input" data-type="attended" data-index="${index}" value="${item.attended}" min="0">
+                        <button class="control-btn increment" data-type="attended" data-index="${index}">+</button>
+                    </div>
+                </td>
+                <td>
+                    <div class="input-control">
+                        <button class="control-btn decrement" data-type="total" data-index="${index}">−</button>
+                        <input type="number" class="attendance-input" data-type="total" data-index="${index}" value="${item.total}" min="0">
+                        <button class="control-btn increment" data-type="total" data-index="${index}">+</button>
+                    </div>
+                </td>
+                <td class="percentage-cell">${item.percentage}%</td>
                 <td class="skippable-cell">${skippableHtml}</td>
             </tr>
         `;
@@ -419,6 +546,9 @@ function displayAttendance(data) {
 
     html += `</tbody></table></div>`;
     resultDiv.innerHTML = html;
+    
+    // Add event listeners for input controls
+    attachInputControlListeners();
     
     // Generate the chart after the HTML is inserted
     generateAttendanceChart(parsedData.attendance);
