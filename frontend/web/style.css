@@ -206,6 +206,7 @@ body {
     background: white;
     border: 2px solid var(--primary);
     box-shadow: none;
+    margin-top: -4px;
 }
 .navbar .threshold-control input[type="range"]::-moz-range-thumb {
     width: 14px;
@@ -214,6 +215,7 @@ body {
     background: white;
     border: 2px solid var(--primary);
     box-shadow: none;
+    margin-top: 0;
 }
 
 /* Slightly thinner track when in navbar */
@@ -479,6 +481,7 @@ input[type="range"]::-webkit-slider-thumb {
     cursor: pointer;
     box-shadow: 0 2px 8px var(--shadow);
     transition: var(--transition-fast);
+    margin-top: -7px;
 }
 
 input[type="range"]::-webkit-slider-thumb:hover {

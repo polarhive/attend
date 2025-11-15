@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+"""
+Main entrypoint for the PESU Attendance Tracker.
+
+Run with environment toggles to choose which components start:
+ - ENABLE_BACKEND_API: start API (defaults to true)
+ - ENABLE_BACKEND_WEB: mount & serve static frontend (defaults to true)
+ - ENABLE_BACKEND_TELEGRAM: launch the telegram bot as a subprocess (defaults to false)
+
+Examples:
+    # Run API and bot, but do not serve frontend
+    export ENABLE_BACKEND_WEB=false
+    export ENABLE_BACKEND_TELEGRAM=true
+    uv run main.py
+"""
 import os
 import re
 import json
@@ -12,6 +26,7 @@ import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, APIRouter, HTTPException, status, Body
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from dataclasses import dataclass
 import subprocess
 import atexit
@@ -112,6 +127,10 @@ class AppSettings:
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         self.DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
         self.REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 5))
+        # Backend feature toggles
+        self.ENABLE_BACKEND_API = os.getenv("ENABLE_BACKEND_API", "true").lower() in ("1", "true", "yes")
+        self.ENABLE_BACKEND_WEB = os.getenv("ENABLE_BACKEND_WEB", "true").lower() in ("1", "true", "yes")
+        self.ENABLE_BACKEND_TELEGRAM = os.getenv("ENABLE_BACKEND_TELEGRAM", "false").lower() in ("1", "true", "yes")
 
 
 def load_mappings_config() -> MappingsConfig:
@@ -161,7 +180,6 @@ def setup_logger(name=None, level=None, format_str=None):
     logger.propagate = False
 
     return logger
-
 
 
 # ============================================================================
@@ -558,15 +576,48 @@ async def get_attendance(request: dict = Body(...)) -> dict:
 
 # Include API routes and mount static files
 app.include_router(router, prefix="/api")
-app.mount("/", StaticFiles(directory="frontend/web", html=True), name="frontend")
+if settings.ENABLE_BACKEND_WEB:
+    app.mount("/", StaticFiles(directory="frontend/web", html=True), name="frontend")
+else:
+    app_logger.info("Frontend static files mount disabled (ENABLE_BACKEND_WEB=false)")
+    # Provide helpful root response when frontend static files are disabled
+    @app.get("/", include_in_schema=False)
+    async def frontend_disabled_root():
+        response_payload, status_code = APIResponse.error(
+            error_type="FeatureDisabled",
+            details="Frontend disabled. Set ENABLE_BACKEND_WEB=true to enable serving the web frontend.",
+            code="frontend_disabled",
+            status_code=404,
+        )
+        return JSONResponse(content=response_payload, status_code=status_code)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def frontend_disabled_catchall(full_path: str):
+        # Do not override API routes - they are defined under /api prefix and take precedence.
+        if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("openapi.json") or full_path.startswith("redoc"):
+            response_payload, status_code = APIResponse.error(
+                error_type="NotFound",
+                details=f"Path '/{full_path}' not found",
+                code="not_found",
+                status_code=404,
+            )
+            return JSONResponse(content=response_payload, status_code=status_code)
+
+        response_payload, status_code = APIResponse.error(
+            error_type="FeatureDisabled",
+            details="Frontend disabled. Set ENABLE_BACKEND_WEB=true to enable serving the web frontend.",
+            code="frontend_disabled",
+            status_code=404,
+        )
+        return JSONResponse(content=response_payload, status_code=status_code)
 
 
 if __name__ == "__main__":
     # Optionally start the Telegram bot as a separate subprocess.
-    # Set START_TELEGRAM_BOT=1 (or true) in the environment to enable.
+    # Set ENABLE_BACKEND_TELEGRAM=1 (or true) in the environment to enable.
     bot_proc = None
     try:
-        if os.getenv("START_TELEGRAM_BOT", "false").lower() in ("1", "true", "yes"):
+        if settings.ENABLE_BACKEND_TELEGRAM:
             tg_bot_path = Path(__file__).resolve().parent / "frontend" / "telegram" / "tg_bot.py"
             if tg_bot_path.exists():
                 cmd = [sys.executable, str(tg_bot_path)]
@@ -589,7 +640,29 @@ if __name__ == "__main__":
             else:
                 print(f"Telegram bot file not found at: {tg_bot_path}, skipping bot start")
 
-        uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=settings.DEBUG)
+        # Optionally start the web server.
+        # Set ENABLE_BACKEND_WEB=1 (or true) in the environment to enable.
+        if settings.ENABLE_BACKEND_API:
+            if settings.ENABLE_BACKEND_WEB:
+                print(f"Starting web + API server on port {settings.PORT}...")
+            else:
+                print(f"Starting API server (frontend disabled) on port {settings.PORT}...")
+            uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=settings.DEBUG)
+        else:
+            print("API server disabled (ENABLE_BACKEND_API set to false)")
+            if bot_proc:
+                print("Running in bot-only mode. Press Ctrl+C to exit.")
+                try:
+                    bot_proc.wait()
+                except KeyboardInterrupt:
+                    print("\nShutting down...")
+            # Keep the process alive if only running the bot
+            if bot_proc:
+                print("Running in bot-only mode. Press Ctrl+C to exit.")
+                try:
+                    bot_proc.wait()
+                except KeyboardInterrupt:
+                    print("\nShutting down...")
     finally:
         # Ensure subprocess is cleaned up on exit
         if bot_proc and bot_proc.poll() is None:

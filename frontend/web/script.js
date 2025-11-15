@@ -284,7 +284,16 @@ function updateskippableValues(threshold) {
             
             const skippableCell = row.querySelector('.skippable-cell');
             if (skippableCell) {
-                skippableCell.textContent = newskippable;
+                let skippableHtml;
+                if (newskippable > 0) {
+                    skippableHtml = `<span class="skippable-skip">✔ Skip ${newskippable}</span>`;
+                } else if (newskippable < 0) {
+                    const need = Math.abs(newskippable);
+                    skippableHtml = `<span class="skippable-need">✘ Need ${need}</span>`;
+                } else {
+                    skippableHtml = '0';
+                }
+                skippableCell.innerHTML = skippableHtml;
             }
         }
     });
@@ -736,8 +745,6 @@ if ('serviceWorker' in navigator) {
     window.addEventListener('load', function() {
         navigator.serviceWorker.register('/sw.js')
             .then(function(registration) {
-                console.log('ServiceWorker registration successful with scope: ', registration.scope);
-                
                 // Check for service worker updates
                 registration.addEventListener('updatefound', function() {
                     const newWorker = registration.installing;
@@ -750,7 +757,7 @@ if ('serviceWorker' in navigator) {
                 });
             })
             .catch(function(err) {
-                console.log('ServiceWorker registration failed: ', err);
+                logMessage('ServiceWorker registration failed', 'error');
             });
     });
 }

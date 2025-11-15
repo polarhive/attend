@@ -11,15 +11,12 @@ const urlsToCache = [
 
 // Install event - cache the assets
 self.addEventListener('install', function(event) {
-  console.log('Service Worker: Installing...');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(function(cache) {
-        console.log('Service Worker: Caching app shell');
         return cache.addAll(urlsToCache);
       })
       .then(function() {
-        console.log('Service Worker: All assets cached');
         // Force the waiting service worker to become the active service worker
         return self.skipWaiting();
       })
@@ -28,13 +25,11 @@ self.addEventListener('install', function(event) {
 
 // Activate event - clean up old caches
 self.addEventListener('activate', function(event) {
-  console.log('Service Worker: Activating...');
   event.waitUntil(
     caches.keys().then(function(cacheNames) {
       return Promise.all(
         cacheNames.map(function(cacheName) {
           if (cacheName !== CACHE_NAME) {
-            console.log('Service Worker: Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
@@ -55,11 +50,9 @@ self.addEventListener('fetch', function(event) {
     event.respondWith(
       fetch(event.request)
         .then(function(response) {
-          console.log('Service Worker: API request successful:', requestUrl.pathname);
           return response;
         })
         .catch(function(error) {
-          console.log('Service Worker: API request failed:', error);
           // Could return a cached error page or default response here
           throw error;
         })
@@ -73,12 +66,10 @@ self.addEventListener('fetch', function(event) {
       .then(function(response) {
         // Return cached version if available
         if (response) {
-          console.log('Service Worker: Serving from cache:', event.request.url);
           return response;
         }
 
         // Otherwise fetch from network
-        console.log('Service Worker: Fetching from network:', event.request.url);
         return fetch(event.request).then(function(response) {
           // Don't cache if not a valid response
           if (!response || response.status !== 200 || response.type !== 'basic') {

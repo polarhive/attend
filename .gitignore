@@ -1,9 +1,33 @@
-*.csv
-__pycache__
-*.png
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
 .env
-.venv
-.uv_cache/
-data
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
 .vscode/
-attend.egg-info/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project specific
+*.csv
+*.png
+data/
+.uv_cache/
+
+# OS
+.DS_Store
+Thumbs.db

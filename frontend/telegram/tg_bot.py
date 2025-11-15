@@ -19,9 +19,9 @@ load_dotenv()
 
 # Configuration
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-PESU_USERNAME = os.getenv("PESU_USERNAME")
-PESU_PASSWORD = os.getenv("PESU_PASSWORD")
-CHAT_ID = os.getenv("CHAT_ID")
+TELEGRAM_PESU_USERNAME = os.getenv("TELEGRAM_PESU_USERNAME")
+TELEGRAM_PESU_PASSWORD = os.getenv("TELEGRAM_PESU_PASSWORD")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
@@ -142,7 +142,7 @@ class AttendanceAPIClient:
 
 def is_authorized(chat_id: int) -> bool:
     """Check if chat_id is authorized"""
-    return CHAT_ID and str(chat_id) == str(CHAT_ID)
+    return TELEGRAM_CHAT_ID and str(chat_id) == str(TELEGRAM_CHAT_ID)
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
@@ -177,24 +177,24 @@ def send_attendance_report(message):
         args = args[1:]
 
     if len(args) >= 2:
-        # Inline credentials provided: do not check CHAT_ID
+        # Inline credentials provided: do not check TELEGRAM_CHAT_ID
         username = args[0]
         password = args[1]
     else:
         # Use stored credentials; require authorized chat
-        username = PESU_USERNAME
-        password = PESU_PASSWORD
+        username = TELEGRAM_PESU_USERNAME
+        password = TELEGRAM_PESU_PASSWORD
         if not is_authorized(chat_id):
             bot.reply_to(message, (
                 "⚠️ Your chat ID is not authorized to use stored credentials.\n"
-                "To proceed, either: use `/get <username> <password>` with credentials, or set `CHAT_ID` in the bot's environment to allow stored credentials."
+                "To proceed, either: use `/get <username> <password>` with credentials, or set `TELEGRAM_CHAT_ID` in the bot's environment to allow stored credentials."
             ))
             return
 
         if not username or not password:
             bot.reply_to(message, (
                 "❌ PESU credentials not configured for stored use.\n"
-                "Either set `PESU_USERNAME` and `PESU_PASSWORD` in `.env`, or call `/get <username> <password>` to provide them inline."
+                "Either set `TELEGRAM_PESU_USERNAME` and `TELEGRAM_PESU_PASSWORD` in `.env`, or call `/get <username> <password>` to provide them inline."
             ))
             return
     
@@ -281,7 +281,7 @@ def send_attendance_report(message):
         bot.reply_to(message, f"❌ Error fetching attendance: {str(e)}")
 
 def is_valid_user(chat_id):
-    return str(chat_id) == CHAT_ID
+    return str(chat_id) == TELEGRAM_CHAT_ID
 
 
 def shutdown_handler(sig, frame):
