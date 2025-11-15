@@ -123,7 +123,7 @@ class AppSettings:
         except Exception:
             pass
 
-        self.PORT = int(os.getenv("PORT", 8000))
+        self.PORT = int(os.getenv("PORT", 10000))
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         self.DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
         self.REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 5))

@@ -22,7 +22,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_PESU_USERNAME = os.getenv("TELEGRAM_PESU_USERNAME")
 TELEGRAM_PESU_PASSWORD = os.getenv("TELEGRAM_PESU_PASSWORD")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+TELEGRAM_GENERATE_GRAPH = str(os.getenv("TELEGRAM_GENERATE_GRAPH", "true")).lower() in ("1", "true", "yes", "on")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:10000")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 os.makedirs("data", exist_ok=True)
@@ -213,53 +214,56 @@ def send_attendance_report(message):
             if api_response.get("success"):
                 attendance_data = api_response.get("data", {}).get("attendance", [])
                 if attendance_data:
-                    current_threshold = threshold_override if threshold_override is not None else int(os.getenv("BUNKABLE_THRESHOLD", "75"))
-                    subjects = []
-                    attended = []
-                    total = []
-                    bunked = []
-                    threshold_marks = []
+                    if not TELEGRAM_GENERATE_GRAPH:
+                        logger.info("Graph generation disabled via TELEGRAM_GENERATE_GRAPH; skipping graph for %s", chat_id)
+                    else:
+                        current_threshold = threshold_override if threshold_override is not None else int(os.getenv("BUNKABLE_THRESHOLD", "75"))
+                        subjects = []
+                        attended = []
+                        total = []
+                        bunked = []
+                        threshold_marks = []
 
-                    for item in attendance_data:
-                        subject = item.get("subject", "Unknown")
-                        raw = item.get("raw_data", "0/0")
-                        try:
-                            a, t = map(int, raw.split("/"))
-                        except Exception:
-                            a, t = 0, 0
-                        subjects.append(subject)
-                        attended.append(a)
-                        total.append(t)
-                        bunked.append(max(t - a, 0))
-                        threshold_marks.append(int((current_threshold / 100) * t) if t > 0 else 0)
-
-                    try:
-                        plt.figure(figsize=(12, 8))
-                        x = np.arange(len(subjects))
-                        plt.bar(x, attended, color='seagreen')
-                        plt.bar(x, bunked, bottom=attended, color='firebrick')
-                        for i in range(len(subjects)):
-                            plt.text(x[i], threshold_marks[i] + 0.5, f"{current_threshold}%: {threshold_marks[i]}", ha='center', fontsize=9)
-                        new_labels = [f"{sub}\n{att}/{tot}" for sub, att, tot in zip(subjects, attended, total)]
-                        plt.xticks(x, new_labels, rotation=45, ha="right")
-                        plt.xlabel("Subjects")
-                        plt.ylabel("Classes")
-                        plt.title(f"Attendance ({current_threshold}% Threshold)")
-                        plt.legend(["Attended", "Bunked"])
-                        plt.tight_layout()
-                        graph_path = f"data/attendance_{chat_id}.png"
-                        plt.savefig(graph_path)
-                        plt.close()
-
-                        if os.path.exists(graph_path):
-                            with open(graph_path, 'rb') as photo:
-                                bot.send_photo(chat_id, photo)
+                        for item in attendance_data:
+                            subject = item.get("subject", "Unknown")
+                            raw = item.get("raw_data", "0/0")
                             try:
-                                os.remove(graph_path)
+                                a, t = map(int, raw.split("/"))
                             except Exception:
-                                pass
-                    except Exception as e:
-                        logger.error(f"Graph generation failed: {e}")
+                                a, t = 0, 0
+                            subjects.append(subject)
+                            attended.append(a)
+                            total.append(t)
+                            bunked.append(max(t - a, 0))
+                            threshold_marks.append(int((current_threshold / 100) * t) if t > 0 else 0)
+
+                        try:
+                            plt.figure(figsize=(12, 8))
+                            x = np.arange(len(subjects))
+                            plt.bar(x, attended, color='seagreen')
+                            plt.bar(x, bunked, bottom=attended, color='firebrick')
+                            for i in range(len(subjects)):
+                                plt.text(x[i], threshold_marks[i] + 0.5, f"{current_threshold}%: {threshold_marks[i]}", ha='center', fontsize=9)
+                            new_labels = [f"{sub}\n{att}/{tot}" for sub, att, tot in zip(subjects, attended, total)]
+                            plt.xticks(x, new_labels, rotation=45, ha="right")
+                            plt.xlabel("Subjects")
+                            plt.ylabel("Classes")
+                            plt.title(f"Attendance ({current_threshold}% Threshold)")
+                            plt.legend(["Attended", "Bunked"])
+                            plt.tight_layout()
+                            graph_path = f"data/attendance_{chat_id}.png"
+                            plt.savefig(graph_path)
+                            plt.close()
+
+                            if os.path.exists(graph_path):
+                                with open(graph_path, 'rb') as photo:
+                                    bot.send_photo(chat_id, photo)
+                                try:
+                                    os.remove(graph_path)
+                                except Exception:
+                                    pass
+                        except Exception as e:
+                            logger.error(f"Graph generation failed: {e}")
 
             # Send text summary
             bot.send_message(chat_id, attendance_text, parse_mode="Markdown")
@@ -299,6 +303,7 @@ if __name__ == '__main__':
     
     logger.info("Starting Telegram bot...")
     logger.info(f"API Base URL: {API_BASE_URL}")
+    logger.info(f"Graph generation enabled: {TELEGRAM_GENERATE_GRAPH}")
     
     try:
         bot.infinity_polling(none_stop=True, long_polling_timeout=60)
