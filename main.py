@@ -176,16 +176,23 @@ class AppSettings:
 
 
 def load_mappings_config() -> MappingsConfig:
-    config_path = Path(__file__).resolve().parent / "mapping.json"
+    repo_root = Path(__file__).resolve().parent
+    web_config = repo_root / "frontend" / "web" / "mapping.json"
 
     try:
-        with config_path.open("r", encoding="utf-8") as file:
-            config_data = json.load(file)
+        if not web_config.exists():
+            raise ConfigurationError(f"mapping.json file not found at: {web_config}.")
+
+        try:
+            with web_config.open("r", encoding="utf-8") as f:
+                config_data = json.load(f)
+        except json.JSONDecodeError as error:
+            raise ConfigurationError(f"Invalid JSON format in configuration file: {error}")
+
         return MappingsConfig(config_data)
-    except FileNotFoundError:
-        raise ConfigurationError(f"Configuration file not found at: {config_path}.")
-    except json.JSONDecodeError as error:
-        raise ConfigurationError(f"Invalid JSON format in configuration file: {error}")
+
+    except ConfigurationError:
+        raise
     except Exception as error:
         raise ConfigurationError(f"Failed to load configuration: {error}")
 
@@ -626,6 +633,32 @@ async def get_attendance(request: dict = Body(...)) -> dict:
 
 # Include API routes and mount static files
 app.include_router(router, prefix="/api")
+# Serve single authoritative mapping.json from repo root for frontend requests
+@app.get("/mapping.json", include_in_schema=False)
+async def serve_mapping_json():
+    repo_root = Path(__file__).resolve().parent
+    config_path = repo_root / "frontend" / "web" / "mapping.json"
+    try:
+        with config_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return JSONResponse(content=data, status_code=200)
+    except FileNotFoundError:
+        payload, status_code = APIResponse.error(
+            error_type="NotFound",
+            details="mapping.json not found at 'frontend/web/mapping.json'",
+            code="mapping_missing",
+            status_code=404,
+        )
+        return JSONResponse(content=payload, status_code=status_code)
+    except json.JSONDecodeError as e:
+        payload, status_code = APIResponse.error(
+            error_type="ConfigError",
+            details=f"Invalid mapping.json: {e}",
+            code="mapping_invalid",
+            status_code=500,
+        )
+        return JSONResponse(content=payload, status_code=status_code)
+
 if settings.ENABLE_BACKEND_WEB:
     app.mount("/", StaticFiles(directory="frontend/web", html=True), name="frontend")
 else:
