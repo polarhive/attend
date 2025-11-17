@@ -7,7 +7,50 @@ const srnInput = document.getElementById('srn');
 const submitButton = document.querySelector('#attendance-form button[type="submit"]');
 
 // Constants and Configuration
-const SRN_REGEX = /^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC)|2UG25CS)\d{3}$/;
+// SRN regex will be generated at runtime from `/mapping.json` so it stays
+// in sync with `BATCH_CLASS_ID_MAPPING`. Initialize to null until built.
+let SRN_REGEX = null;
+
+function buildSrnRegexFromMapping(mapping) {
+    const mappingKeys = Object.keys(mapping?.BATCH_CLASS_ID_MAPPING || {});
+    const groups = {}; // batch -> Set(branches)
+
+    mappingKeys.forEach(key => {
+        if (!key.startsWith('PES')) return;
+        const rest = key.slice(3); // e.g. '2UG23AM'
+        const batch = rest.slice(0, 5); // '2UG23'
+        const branch = rest.slice(5); // 'AM' or 'CS'
+        if (!groups[batch]) groups[batch] = new Set();
+        if (branch) groups[batch].add(branch);
+    });
+
+    const parts = Object.entries(groups).map(([batch, branchSet]) => {
+        const branches = Array.from(branchSet);
+        if (branches.length === 0) return batch;
+        if (branches.length === 1) return `${batch}${branches[0]}`;
+        return `${batch}(?:${branches.join('|')})`;
+    });
+
+    if (parts.length === 0) {
+        return new RegExp('^$');
+    }
+
+    const pattern = `^PES(?:${parts.join('|')})\\d{3}$`;
+    return new RegExp(pattern);
+}
+
+async function loadMappingAndBuildRegex() {
+    try {
+        const resp = await fetch('/mapping.json', {cache: 'no-cache'});
+        if (!resp.ok) throw new Error(`Failed to fetch mapping.json: ${resp.status}`);
+        const mapping = await resp.json();
+        SRN_REGEX = buildSrnRegexFromMapping(mapping);
+        logMessage('SRN regex generated from mapping.json', 'info');
+    } catch (err) {
+        SRN_REGEX = null;
+        logMessage(`Could not load mapping.json: ${err.message}`, 'error');
+    }
+}
 
 // Global State
 let isProcessing = false;
@@ -547,6 +590,9 @@ const Auth = {
 
 // Validate SRN format
 function validateSRN(srn) {
+    // If regex isn't ready yet, allow validation (will be checked later),
+    // but mark non-empty SRNs as tentatively valid so UX isn't blocked.
+    if (!SRN_REGEX) return true;
     return SRN_REGEX.test(srn.toUpperCase());
 }
 
@@ -722,6 +768,9 @@ if (thresholdSlider) {
 
 // Initialize on page load
 window.addEventListener('load', () => {
+    // Load mapping.json and build SRN regex before user interaction
+    loadMappingAndBuildRegex();
+
     cleanUrlParameters();
 
     if (Auth.loadFromCookies()) {
