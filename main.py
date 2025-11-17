@@ -89,19 +89,61 @@ class MappingsConfig:
         self.SUBJECT_MAPPING = config.get("SUBJECT_MAPPING", {})
 
     def get_branch_config(self, srn: str) -> MappingsData:
-        # Validate SRN format using comprehensive regex pattern
-        pattern = r"^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC)|2UG25CS)\d{3}$"
-        match = re.match(pattern, srn)
+        # Build a dynamic regex from configured batch keys so SRN validation
+        # stays in sync with `BATCH_CLASS_ID_MAPPING` in mapping.json.
+        keys = list(self.BATCH_CLASS_ID_MAPPING.keys())
 
-        if not match:
+        # Normalize keys to remove leading 'PES' for pattern building
+        normalized = []
+        for k in keys:
+            if k.startswith('PES'):
+                normalized.append(k[3:])
+            else:
+                normalized.append(k)
+
+        # Group by batch prefix (first 5 chars, e.g. '2UG23') and collect branches
+        groups = {}
+        for token in normalized:
+            batch = token[:5]
+            branch = token[5:]
+            groups.setdefault(batch, set())
+            if branch:
+                groups[batch].add(branch)
+
+        parts = []
+        for batch, branch_set in groups.items():
+            if not branch_set:
+                parts.append(batch)
+            else:
+                branches = sorted(branch_set)
+                if len(branches) == 1:
+                    parts.append(f"{batch}{branches[0]}")
+                else:
+                    parts.append(f"{batch}(?:{'|'.join(branches)})")
+
+        if not parts:
+            raise ValueError("No batch mappings configured to validate SRNs")
+
+        pattern = rf"^PES(?:{'|'.join(parts)})\d{{3}}$"
+        if not re.match(pattern, srn):
             raise ValueError(f"Invalid SRN format: '{srn}'")
 
-        branch_prefix = match.group(1)
-        full_prefix = f"PES{branch_prefix}"
+        # Determine the exact mapping key by checking which configured key the SRN starts with
+        full_prefix = None
+        for k in keys:
+            if srn.startswith(k):
+                full_prefix = k
+                break
+
+        if full_prefix is None:
+            available_branches = keys
+            raise ValueError(
+                f"Missing batch class ID for SRN prefix derived from '{srn}'. Available: {available_branches}"
+            )
 
         batch_class_id = self.BATCH_CLASS_ID_MAPPING.get(full_prefix)
         if batch_class_id is None:
-            available_branches = list(self.BATCH_CLASS_ID_MAPPING.keys())
+            available_branches = keys
             raise ValueError(
                 f"Missing batch class ID for branch '{full_prefix}'. Available: {available_branches}"
             )
@@ -214,11 +256,19 @@ class PESUAttendanceScraper:
             self.subject_mapping = branch_config.subject_mapping
 
             # Extract branch prefix from username for logging
-            pattern = (
-                r"^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC)|2UG25CS)\d{3}$"
-            )
-            match = re.match(pattern, username)
-            self.branch_prefix = match.group(1) if match else username[:10]
+            # Derive a human-friendly branch prefix for logging by matching the
+            # configured mapping keys (fall back to a slice of username).
+            full_prefix = None
+            for k in mappings.BATCH_CLASS_ID_MAPPING.keys():
+                if username.startswith(k):
+                    full_prefix = k
+                    break
+
+            if full_prefix:
+                # strip leading 'PES' for compact display (e.g. '2UG23CS')
+                self.branch_prefix = full_prefix[3:]
+            else:
+                self.branch_prefix = username[:10]
 
         except ValueError as e:
             raise ConfigurationError(f"Configuration error: {e}")
