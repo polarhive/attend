@@ -609,7 +609,7 @@ function checkSRNValidity() {
         if (srn.length === 13) {
             logMessage("SRN not in mapping: open a PR on GitHub", "error");
             setTimeout(() => {
-                window.location.href = "https://github.com/polarhive/attend?tab=readme-ov-file#adding-your-branch";
+                window.location.href = "https://github.com/polarhive/attend";
             }, 2000);
         }
     } else {
