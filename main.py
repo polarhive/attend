@@ -90,7 +90,7 @@ class MappingsConfig:
 
     def get_branch_config(self, srn: str) -> MappingsData:
         # Validate SRN format using comprehensive regex pattern
-        pattern = r"^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC))\d{3}$"
+        pattern = r"^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC)|2UG25CS)\d{3}$"
         match = re.match(pattern, srn)
 
         if not match:
@@ -215,7 +215,7 @@ class PESUAttendanceScraper:
 
             # Extract branch prefix from username for logging
             pattern = (
-                r"^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC))\d{3}$"
+                r"^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC)|2UG25CS)\d{3}$"
             )
             match = re.match(pattern, username)
             self.branch_prefix = match.group(1) if match else username[:10]

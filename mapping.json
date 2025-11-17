@@ -6,7 +6,8 @@
         "PES2UG23AM": 2970,
         "PES2UG23CS": 2968,
         "PES2UG23EC": 2965,
-        "PES2UG24CS": 2969
+        "PES2UG24CS": 2969,
+        "PES2UG25CS": [2972, 2973]
     },
     "SUBJECT_MAPPING": {
         "UE23CS241B": "DAA",
@@ -53,6 +54,19 @@
         "UE25ME141B": "MES",
         "UE25PH151B": "Phy",
         "UL25CE121B": "Constitution",
+        "UE25CS151A": "Python",
+        "UE25CS151A(LAB)": "Python LAB",
+        "UE25CV141A": "Statics",
+        "UE25CY151A": "Chem",
+        "UE25CY151A(LAB)": "Chem LAB",
+        "UE25EC141A": "EPD",
+        "UE25MA141A": "Math-I",
+        "UL25CE121A": "Constitution",
+        "UE25EE141A": "Electrical",
+        "UE25EV121A": "EVS",
+        "UE25ME141A": "Mechanical",
+        "UE25PH151A": "Physics",
+        "UE25PH151A(LAB)": "Physics LAB",
         "UZ23UZ221B": "CIE"
-    }
+    }   
 }

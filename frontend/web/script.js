@@ -7,7 +7,7 @@ const srnInput = document.getElementById('srn');
 const submitButton = document.querySelector('#attendance-form button[type="submit"]');
 
 // Constants and Configuration
-const SRN_REGEX = /^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC))\d{3}$/;
+const SRN_REGEX = /^PES(2UG23(CS|AM|EC)|2UG24(CS|AM|EC)|2UG25CS)\d{3}$/;
 
 // Global State
 let isProcessing = false;
