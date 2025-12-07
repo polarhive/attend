@@ -52,7 +52,16 @@
     <!-- Main Content -->
     <main class="container">
         <!-- Attendance Form -->
-        <div class="form-wrapper">
+            <!-- Compact how-it-works bar for non-logged-in users -->
+            <div id="how-it-works" class="info-box" role="region" aria-labelledby="how-title">
+                <div class="info-bar-text">
+                    <span>
+                        Credentials stored locally on your browser. No SRN or personal data logged. Checkout the code on GitHub.
+                    </span>
+                </div>
+            </div>
+
+            <div class="form-wrapper">
             <form id="attendance-form" class="glass-card">
                 <div class="form-header">
                     <h2>Sign In</h2>
@@ -85,6 +94,12 @@
                     </svg>
                 </button>
             </form>
+        </div>
+
+        <!-- Skeleton loader for auto-login -->
+        <div id="skeleton-loader" style="display: none;">
+            <div class="skeleton skeleton-chart"></div>
+            <div class="skeleton skeleton-table"></div>
         </div>
 
         <!-- Attendance Result -->

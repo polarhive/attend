@@ -57,7 +57,7 @@ let isProcessing = false;
 let currentAttendanceData = null; // Store current data for threshold updates
 let isOffline = false;
 
-// Create loading animation container
+// Create loading animation container with skeleton
 const loadingContainer = document.createElement('div');
 loadingContainer.className = 'loading-container';
 loadingContainer.innerHTML = `
@@ -68,6 +68,15 @@ loadingContainer.innerHTML = `
         <div class="loading-dot"></div>
         <div class="loading-dot"></div>
         <div class="loading-dot"></div>
+    </div>
+    <div class="skeleton-loader" style="margin-top: 2rem;">
+        <div class="skeleton-chart-container">
+            <div class="skeleton-bar"></div>
+            <div class="skeleton-bar"></div>
+            <div class="skeleton-bar"></div>
+            <div class="skeleton-bar"></div>
+            <div class="skeleton-bar"></div>
+        </div>
     </div>
     <div class="loading-logs" id="loading-logs"></div>
 `;
@@ -218,14 +227,17 @@ function generateAttendanceChart(attendanceData, customThreshold = null) {
                 },
                 legend: {
                     display: true,
-                    position: 'top',
+                    position: 'bottom',
+                    align: 'center',
                     labels: {
                         color: '#ffffff',
-                        padding: 15,
+                        padding: 12,
                         font: {
                             size: 13,
                             weight: '500'
-                        }
+                        },
+                        usePointStyle: true,
+                        boxWidth: 12,
                     }
                 }
             },
@@ -578,16 +590,16 @@ function displayAttendance(data) {
                 <td>${item.subject}</td>
                 <td>
                     <div class="input-control">
-                        <button class="control-btn decrement" data-type="attended" data-index="${index}">−</button>
-                        <input type="number" class="attendance-input" data-type="attended" data-index="${index}" value="${item.attended}" min="0">
-                        <button class="control-btn increment" data-type="attended" data-index="${index}">+</button>
+                        <button class="control-btn decrement" data-type="attended" data-index="${index}" aria-label="Decrease attended count for ${item.subject}">−</button>
+                        <input type="number" class="attendance-input" data-type="attended" data-index="${index}" value="${item.attended}" min="0" aria-label="Attended classes for ${item.subject}">
+                        <button class="control-btn increment" data-type="attended" data-index="${index}" aria-label="Increase attended count for ${item.subject}">+</button>
                     </div>
                 </td>
                 <td>
                     <div class="input-control">
-                        <button class="control-btn decrement" data-type="total" data-index="${index}">−</button>
-                        <input type="number" class="attendance-input" data-type="total" data-index="${index}" value="${item.total}" min="0">
-                        <button class="control-btn increment" data-type="total" data-index="${index}">+</button>
+                        <button class="control-btn decrement" data-type="total" data-index="${index}" aria-label="Decrease total count for ${item.subject}">−</button>
+                        <input type="number" class="attendance-input" data-type="total" data-index="${index}" value="${item.total}" min="0" aria-label="Total classes for ${item.subject}">
+                        <button class="control-btn increment" data-type="total" data-index="${index}" aria-label="Increase total count for ${item.subject}">+</button>
                     </div>
                 </td>
                 <td class="percentage-cell">${item.percentage}%</td>
@@ -626,6 +638,14 @@ function updateUIForLoggedInState() {
     const githubLink = document.getElementById('github-link');
     if (githubLink) {
         githubLink.style.display = isLoggedIn ? 'none' : 'inline-flex';
+    }
+
+    // Show/hide the informational "how it works" box for non-logged-in users
+    // Only show it if user has never used the app (no saved credentials or threshold)
+    const howBox = document.getElementById('how-it-works');
+    if (howBox) {
+        const hasSavedData = Cookies.get('srn') || Cookies.get('password') || Cookies.get('threshold');
+        howBox.style.display = (isLoggedIn || hasSavedData) ? 'none' : 'block';
     }
 
     if (!isLoggedIn) {
@@ -896,23 +916,41 @@ if (thresholdSlider) {
     thresholdSlider.addEventListener('input', handleThresholdChange);
 }
 
-// Initialize on page load
-window.addEventListener('load', () => {
-    // Load mapping.json and build SRN regex before user interaction
-    loadMappingAndBuildRegex();
-
-    cleanUrlParameters();
-
-    if (Auth.loadFromCookies()) {
-        updateUIForLoggedInState();
-        // Auto-fetch attendance if user was previously logged in
-        if (Auth.credentials.srn && Auth.credentials.password) {
-            fetchAttendance(Auth.credentials.srn, Auth.credentials.password);
-        }
-    } else {
-        updateUIForLoggedInState();
+// Check cookies once and initialize UI appropriately
+(function initializeApp() {
+    const hasSavedCredentials = document.cookie.includes('srn=') && document.cookie.includes('password=');
+    
+    if (hasSavedCredentials) {
+        // Show loading state immediately (before DOMContentLoaded)
+        setLoadingState(true);
+        
+        // Hide form and info box immediately
+        document.addEventListener('DOMContentLoaded', () => {
+            const formWrapper = document.querySelector('.form-wrapper');
+            const howBox = document.getElementById('how-it-works');
+            
+            if (formWrapper) formWrapper.style.display = 'none';
+            if (howBox) howBox.style.display = 'none';
+        });
     }
-});
+    
+    window.addEventListener('load', () => {
+        // Load mapping.json and build SRN regex before user interaction
+        loadMappingAndBuildRegex();
+        cleanUrlParameters();
+
+        // Use the saved credentials check result
+        if (hasSavedCredentials && Auth.loadFromCookies()) {
+            updateUIForLoggedInState();
+            // Auto-fetch attendance if user was previously logged in
+            if (Auth.credentials.srn && Auth.credentials.password) {
+                fetchAttendance(Auth.credentials.srn, Auth.credentials.password);
+            }
+        } else {
+            updateUIForLoggedInState();
+        }
+    });
+})();
 
 // Handle navigation events
 window.addEventListener('popstate', () => {
