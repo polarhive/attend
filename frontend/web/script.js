@@ -1,4 +1,123 @@
-// DOM Elements
+// This script builds the DOM structure and contains the main application logic for the Attend web app.
+function buildStaticDOM() {
+    // Background gradients
+    const bg1 = document.createElement('div');
+    bg1.className = 'bg-gradient';
+    const bg2 = document.createElement('div');
+    bg2.className = 'bg-gradient-2';
+    document.body.appendChild(bg1);
+    document.body.appendChild(bg2);
+
+    // Navbar
+    const nav = document.createElement('nav');
+    nav.className = 'navbar';
+
+    const titleWrap = document.createElement('div');
+    const h1 = document.createElement('h1');
+    h1.id = 'navbar-title';
+    h1.textContent = 'Attend';
+    titleWrap.appendChild(h1);
+
+    const controls = document.createElement('div');
+    controls.className = 'navbar-controls';
+
+    const githubLink = document.createElement('a');
+    githubLink.id = 'github-link';
+    githubLink.href = 'https://github.com/polarhive/attend';
+    githubLink.target = '_blank';
+    githubLink.rel = 'noopener noreferrer';
+    githubLink.className = 'icon-btn';
+    githubLink.style.display = 'inline-flex';
+    githubLink.setAttribute('aria-label', 'GitHub');
+    githubLink.innerHTML = `<svg viewBox="0 0 24 24" fill="white"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>`;
+
+    const navbarThreshold = document.createElement('div');
+    navbarThreshold.id = 'navbar-threshold';
+    navbarThreshold.className = 'threshold-control';
+    navbarThreshold.style.display = 'none';
+    navbarThreshold.innerHTML = `
+        <label for="threshold-slider">
+            <span class="threshold-label">Min:</span>
+            <span id="threshold-display" class="threshold-value">75%</span>
+        </label>
+        <input type="range" id="threshold-slider" min="50" max="100" value="75" step="1">
+    `;
+
+    const logoutBtn = document.createElement('button');
+    logoutBtn.id = 'logout-btn';
+    logoutBtn.className = 'btn-secondary';
+    logoutBtn.style.display = 'none';
+    logoutBtn.innerHTML = `<svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>`;
+
+    controls.appendChild(githubLink);
+    controls.appendChild(navbarThreshold);
+    controls.appendChild(logoutBtn);
+
+    nav.appendChild(titleWrap);
+    nav.appendChild(controls);
+    document.body.appendChild(nav);
+
+    // Notification container
+    const notif = document.createElement('div');
+    notif.id = 'notification-container';
+    document.body.appendChild(notif);
+
+    // Main content container
+    const main = document.createElement('main');
+    main.className = 'container';
+
+    // How-it-works info box
+    const how = document.createElement('div');
+    how.id = 'how-it-works';
+    how.className = 'info-box';
+    how.setAttribute('role', 'region');
+    how.innerHTML = `<div class="info-bar-text"><span>Credentials stored locally on your browser. No SRN or personal data logged. Checkout the code on GitHub.</span></div>`;
+
+    // Form wrapper and form (IDs used by app logic)
+    const formWrapper = document.createElement('div');
+    formWrapper.className = 'form-wrapper';
+
+    const form = document.createElement('form');
+    form.id = 'attendance-form';
+    form.className = 'glass-card';
+
+    form.innerHTML = `
+        <div class="form-header"><h2>Sign In</h2></div>
+        <div class="form-group">
+            <label for="srn">SRN</label>
+            <input type="text" id="srn" name="srn" required placeholder="PES2UG23CS123" autocomplete="username" />
+        </div>
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required placeholder="••••••••" autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn-primary"><span>Get Attendance</span></button>
+    `;
+
+    formWrapper.appendChild(form);
+    main.appendChild(how);
+    main.appendChild(formWrapper);
+
+    // Skeleton loader
+    const skeleton = document.createElement('div');
+    skeleton.id = 'skeleton-loader';
+    skeleton.style.display = 'none';
+    skeleton.innerHTML = `<div class="skeleton skeleton-chart"></div><div class="skeleton skeleton-table"></div>`;
+    main.appendChild(skeleton);
+
+    // Result container
+    const result = document.createElement('div');
+    result.className = 'result';
+    result.id = 'result';
+    main.appendChild(result);
+
+    document.body.appendChild(main);
+}
+
+// Build the DOM immediately
+buildStaticDOM();
+
+// DOM Elements (now available)
 const form = document.getElementById('attendance-form');
 const resultDiv = document.getElementById('result');
 const logoutBtn = document.getElementById('logout-btn');
@@ -6,20 +125,20 @@ const notificationContainer = document.getElementById('notification-container');
 const srnInput = document.getElementById('srn');
 const submitButton = document.querySelector('#attendance-form button[type="submit"]');
 
+// --- Begin copied app logic (adapted from original script.js) ---
+
 // Constants and Configuration
-// SRN regex will be generated at runtime from `/mapping.json` so it stays
-// in sync with `BATCH_CLASS_ID_MAPPING`. Initialize to null until built.
 let SRN_REGEX = null;
 
 function buildSrnRegexFromMapping(mapping) {
     const mappingKeys = Object.keys(mapping?.BATCH_CLASS_ID_MAPPING || {});
-    const groups = {}; // batch -> Set(branches)
+    const groups = {};
 
     mappingKeys.forEach(key => {
         if (!key.startsWith('PES')) return;
-        const rest = key.slice(3); // e.g. '2UG23AM'
-        const batch = rest.slice(0, 5); // '2UG23'
-        const branch = rest.slice(5); // 'AM' or 'CS'
+        const rest = key.slice(3);
+        const batch = rest.slice(0, 5);
+        const branch = rest.slice(5);
         if (!groups[batch]) groups[batch] = new Set();
         if (branch) groups[batch].add(branch);
     });
@@ -54,8 +173,10 @@ async function loadMappingAndBuildRegex() {
 
 // Global State
 let isProcessing = false;
-let currentAttendanceData = null; // Store current data for threshold updates
+let currentAttendanceData = null;
 let isOffline = false;
+// Track whether stage-2 loader has already been shown to avoid duplicates
+let stage2Shown = false;
 
 // Create loading animation container with skeleton
 const loadingContainer = document.createElement('div');
@@ -80,7 +201,7 @@ loadingContainer.innerHTML = `
     </div>
     <div class="loading-logs" id="loading-logs"></div>
 `;
-document.body.appendChild(loadingContainer);
+// Loader will be inserted into the DOM when needed (see ensureLoaderInserted)
 
 // Create offline indicator
 const offlineIndicator = document.createElement('div');
@@ -104,11 +225,91 @@ logsDropdown.appendChild(logsSummary);
 logsDropdown.appendChild(logsContainer);
 document.body.appendChild(logsDropdown);
 
+// --- Loader stage helpers (we keep the loader element but insert it when needed) ---
+function fadeOutElement(el, ms = 300) {
+    return new Promise(resolve => {
+        if (!el) return resolve();
+        el.style.transition = `opacity ${ms}ms ease`;
+        el.style.opacity = '1';
+        // trigger layout
+        void el.offsetWidth;
+        el.style.opacity = '0';
+        setTimeout(() => {
+            el.style.display = 'none';
+            resolve();
+        }, ms);
+    });
+}
+
+function fadeInElement(el, ms = 300, display = 'block') {
+    return new Promise(resolve => {
+        if (!el) return resolve();
+        el.style.display = display;
+        el.style.opacity = '0';
+        el.style.transition = `opacity ${ms}ms ease`;
+        // trigger layout
+        void el.offsetWidth;
+        el.style.opacity = '1';
+        setTimeout(() => resolve(), ms);
+    });
+}
+
+function ensureLoaderInserted() {
+    const nav = document.querySelector('.navbar');
+    if (!nav) return;
+    if (!loadingContainer.parentNode || loadingContainer.parentNode !== nav.parentNode) {
+        // insert directly after navbar to avoid gaps
+        nav.parentNode.insertBefore(loadingContainer, nav.nextSibling);
+        // small gap to visually match the chart/card top gap
+        loadingContainer.style.marginTop = '12px';
+        loadingContainer.style.display = 'none';
+        loadingContainer.style.width = '100%';
+    }
+}
+
+async function showStage2Loader() {
+    ensureLoaderInserted();
+    if (stage2Shown) return;
+    stage2Shown = true;
+    // hide any result area while loading
+    const result = document.getElementById('result');
+    if (result) result.style.display = 'none';
+    await fadeInElement(loadingContainer, 240, 'block');
+}
+
+async function showStage3Result() {
+    // fade loader out and reveal result area
+    await fadeOutElement(loadingContainer, 200);
+    stage2Shown = false;
+    const result = document.getElementById('result');
+    if (result) {
+        // show instantly without animation
+        result.style.transition = 'none';
+        result.style.display = 'block';
+        result.style.opacity = '1';
+    }
+}
+
+async function showOfflineBanner() {
+    try {
+        logsDropdown.open = true;
+    } catch (e) {
+        offlineIndicator.style.display = 'block';
+    }
+}
+
+async function hideOfflineBanner() {
+    try {
+        logsDropdown.open = false;
+    } catch (e) {
+        offlineIndicator.style.display = 'none';
+    }
+}
+
 function setLoadingState(isLoading) {
     document.body.classList.toggle('loading', isLoading);
 }
 function logMessage(message, type = 'info') {
-    // Create notification only for errors
     if (type === 'error') {
         const notif = document.createElement('div');
         notif.className = 'notification';
@@ -117,7 +318,6 @@ function logMessage(message, type = 'info') {
         setTimeout(() => notif.remove(), 3000);
     }
 
-    // Add timestamp to log entry
     const timestamp = new Date().toLocaleTimeString('en-US', { 
         hour12: false, 
         hour: '2-digit', 
@@ -142,45 +342,33 @@ function logMessage(message, type = 'info') {
     logsContainer.appendChild(logEntry);
     logsSummary.textContent = `Show Logs (${logsContainer.childElementCount})`;
     
-    // Also display on loading screen if visible
     const loadingLogs = document.getElementById('loading-logs');
     if (loadingLogs && document.body.classList.contains('loading')) {
         const loadingLogEntry = document.createElement('div');
         loadingLogEntry.className = 'loading-log-entry';
         loadingLogEntry.innerHTML = `<span style="color: var(--text-tertiary); margin-right: 0.5rem;">[${timestamp}]</span><span style="color: ${type === 'error' ? 'var(--danger)' : 'var(--text-secondary)'}">${message}</span>`;
         loadingLogs.appendChild(loadingLogEntry);
-        // Auto-scroll to bottom
         loadingLogs.scrollTop = loadingLogs.scrollHeight;
     }
 }
 
-// Clear the logs container
 function clearLogs() {
     logsContainer.innerHTML = '';
     logsSummary.textContent = 'Show Logs';
     logsDropdown.open = false;
 }
 
-// Generate attendance chart using Chart.js
 function generateAttendanceChart(attendanceData, customThreshold = null) {
     const ctx = document.getElementById('attendanceChart').getContext('2d');
-    
-    // Destroy existing chart if it exists
     if (window.attendanceChart instanceof Chart) {
         window.attendanceChart.destroy();
     }
-    
     const subjects = attendanceData.map(item => item.subject);
     const attendedData = attendanceData.map(item => item.attended);
     const skippedData = attendanceData.map(item => item.skipped);
     const totalData = attendanceData.map(item => item.total);
-    
-    // Use custom threshold if provided, otherwise use the original threshold
     const threshold = customThreshold !== null ? customThreshold : (attendanceData[0]?.threshold || 75);
-    
-    // Recalculate threshold marks based on current threshold
     const thresholdData = totalData.map(total => Math.ceil((threshold / 100) * total));
-    
     window.attendanceChart = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -188,143 +376,38 @@ function generateAttendanceChart(attendanceData, customThreshold = null) {
                 `${subject}\n${attendedData[index]}/${attendedData[index] + skippedData[index]}`
             ),
             datasets: [
-                {
-                    label: 'Attended',
-                    data: attendedData,
-                    backgroundColor: 'rgb(34, 197, 94)',
-                    borderColor: 'rgb(34, 197, 94)',
-                    borderWidth: 0
-                },
-                {
-                    label: 'Skipped',
-                    data: skippedData,
-                    backgroundColor: 'rgb(239, 68, 68)',
-                    borderColor: 'rgb(239, 68, 68)',
-                    borderWidth: 0
-                },
-                {
-                    label: `${threshold}% Threshold`,
-                    data: thresholdData,
-                    type: 'line',
-                    backgroundColor: 'rgba(250, 204, 21, 0.2)',
-                    borderColor: 'rgb(250, 204, 21)',
-                    borderWidth: 3,
-                    fill: false,
-                    pointRadius: 5,
-                    pointHoverRadius: 7,
-                    pointBackgroundColor: 'rgb(250, 204, 21)',
-                    pointBorderColor: 'rgb(250, 204, 21)',
-                    tension: 0
-                }
+                { label: 'Attended', data: attendedData, backgroundColor: 'rgb(34, 197, 94)', borderColor: 'rgb(34, 197, 94)', borderWidth: 0 },
+                { label: 'Skipped', data: skippedData, backgroundColor: 'rgb(239, 68, 68)', borderColor: 'rgb(239, 68, 68)', borderWidth: 0 },
+                { label: `${threshold}% Threshold`, data: thresholdData, type: 'line', backgroundColor: 'rgba(250, 204, 21, 0.2)', borderColor: 'rgb(250, 204, 21)', borderWidth: 3, fill: false, pointRadius: 5, pointHoverRadius: 7, pointBackgroundColor: 'rgb(250, 204, 21)', pointBorderColor: 'rgb(250, 204, 21)', tension: 0 }
             ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                title: {
-                    display: false
-                },
-                legend: {
-                    display: true,
-                    position: 'bottom',
-                    align: 'center',
-                    labels: {
-                        color: '#ffffff',
-                        padding: 12,
-                        font: {
-                            size: 13,
-                            weight: '500'
-                        },
-                        usePointStyle: true,
-                        boxWidth: 12,
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    stacked: true,
-                    title: {
-                        display: false,
-                        text: 'Subjects',
-                        color: '#a1a1aa',
-                        font: {
-                            size: 12,
-                            weight: '500'
-                        }
-                    },
-                    ticks: {
-                        color: '#a1a1aa',
-                        font: {
-                            size: 11
-                        }
-                    },
-                    grid: {
-                        color: 'rgba(255, 255, 255, 0.05)',
-                        drawBorder: false
-                    }
-                },
-                y: {
-                    stacked: true,
-                    title: {
-                        display: false,
-                        text: 'Classes',
-                        color: '#a1a1aa',
-                        font: {
-                            size: 12,
-                            weight: '500'
-                        }
-                    },
-                    beginAtZero: true,
-                    ticks: {
-                        color: '#a1a1aa',
-                        font: {
-                            size: 11
-                        }
-                    },
-                    grid: {
-                        color: 'rgba(255, 255, 255, 0.05)',
-                        drawBorder: false
-                    }
-                }
-            },
-            interaction: {
-                intersect: false,
-                mode: 'index'
-            }
+            plugins: { title: { display: false }, legend: { display: true, position: 'bottom', align: 'center', labels: { color: '#ffffff', padding: 12, font: { size: 13, weight: '500' }, usePointStyle: true, boxWidth: 12 } } },
+            scales: { x: { stacked: true, ticks: { color: '#a1a1aa', font: { size: 11 } }, grid: { color: 'rgba(255, 255, 255, 0.05)', drawBorder: false } }, y: { stacked: true, beginAtZero: true, ticks: { color: '#a1a1aa', font: { size: 11 } }, grid: { color: 'rgba(255, 255, 255, 0.05)', drawBorder: false } } },
+            interaction: { intersect: false, mode: 'index' }
         }
     });
 }
 
-// Update threshold and regenerate chart
 function updateThreshold(newThreshold) {
     if (!currentAttendanceData) return;
-    
-    // Save the new threshold to cookies
     ThresholdManager.saveThreshold(newThreshold);
-    
-    // Update the threshold display
     const thresholdDisplay = document.getElementById('threshold-display');
     if (thresholdDisplay) {
         thresholdDisplay.textContent = `${newThreshold}%`;
     }
-    
-    // Regenerate chart with new threshold
     generateAttendanceChart(currentAttendanceData, newThreshold);
-    
-    // Update the table with recalculated skippable values
     updateskippableValues(newThreshold);
 }
 
-// Update skippable values in the table
 function updateskippableValues(threshold) {
     const tableRows = document.querySelectorAll('#attendance-table tbody tr');
-    
     tableRows.forEach((row, index) => {
         if (index < currentAttendanceData.length) {
             const item = currentAttendanceData[index];
             let newskippable;
-            
             if (item.total === 0) {
                 newskippable = 0;
             } else {
@@ -336,7 +419,6 @@ function updateskippableValues(threshold) {
                     newskippable = -needed;
                 }
             }
-            
             const skippableCell = row.querySelector('.skippable-cell');
             if (skippableCell) {
                 let skippableHtml;
@@ -354,37 +436,23 @@ function updateskippableValues(threshold) {
     });
 }
 
-// Parse raw attendance data and convert to expected format
 function parseAttendanceData(rawData) {
     if (!rawData || !rawData.attendance) {
         return rawData;
     }
 
-    const threshold = ThresholdManager.getThreshold(); // Use saved threshold
-    
+    const threshold = ThresholdManager.getThreshold();
+
     const parsedAttendance = rawData.attendance.map(item => {
         const attendanceParts = item.raw_data.split("/");
-        
         if (attendanceParts.length !== 2) {
             console.warn(`Invalid attendance format: ${item.raw_data}`);
-            return {
-                subject: item.subject,
-                attended: 0,
-                total: 0,
-                skipped: 0,
-                percentage: 0,
-                skippable: 0,
-                threshold: threshold
-            };
+            return { subject: item.subject, attended: 0, total: 0, skipped: 0, percentage: 0, skippable: 0, threshold: threshold };
         }
-
         const attended = parseInt(attendanceParts[0]);
         const total = parseInt(attendanceParts[1]);
         const skipped = total - attended;
         const percentage = total > 0 ? Math.round((attended / total) * 100 * 100) / 100 : 0;
-        
-        // Calculate skippable classes (max classes can skip while staying above threshold)
-        // If negative, it shows how many classes need to be attended to reach threshold
         let skippable;
         if (total === 0) {
             skippable = 0;
@@ -398,192 +466,79 @@ function parseAttendanceData(rawData) {
             }
         }
 
-        return {
-            subject: item.subject,
-            attended: attended,
-            total: total,
-            skipped: skipped,
-            percentage: percentage,
-            skippable: skippable,
-            threshold: threshold
-        };
+        return { subject: item.subject, attended: attended, total: total, skipped: skipped, percentage: percentage, skippable: skippable, threshold: threshold };
     });
 
-    return {
-        ...rawData,
-        attendance: parsedAttendance
-    };
+    return { ...rawData, attendance: parsedAttendance };
 }
 
-// Attach event listeners to input controls
 function attachInputControlListeners() {
-    // Handle increment/decrement buttons
     document.querySelectorAll('.control-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             const button = e.target;
             const type = button.dataset.type;
             const index = parseInt(button.dataset.index);
             const input = document.querySelector(`input[data-type="${type}"][data-index="${index}"]`);
-            
             if (!input) return;
-            
             let value = parseInt(input.value) || 0;
-            
-            if (button.classList.contains('increment')) {
-                value++;
-            } else if (button.classList.contains('decrement')) {
-                value = Math.max(0, value - 1);
-            }
-            
+            if (button.classList.contains('increment')) { value++; }
+            else if (button.classList.contains('decrement')) { value = Math.max(0, value - 1); }
             input.value = value;
             recalculateRow(index);
         });
     });
-    
-    // Handle direct input changes
     document.querySelectorAll('.attendance-input').forEach(input => {
-        input.addEventListener('input', (e) => {
-            const index = parseInt(e.target.dataset.index);
-            recalculateRow(index);
-        });
-        
-        input.addEventListener('blur', (e) => {
-            // Ensure value is valid on blur
-            let value = parseInt(e.target.value);
-            if (isNaN(value) || value < 0) {
-                e.target.value = 0;
-                recalculateRow(parseInt(e.target.dataset.index));
-            }
-        });
+        input.addEventListener('input', (e) => { const index = parseInt(e.target.dataset.index); recalculateRow(index); });
+        input.addEventListener('blur', (e) => { let value = parseInt(e.target.value); if (isNaN(value) || value < 0) { e.target.value = 0; recalculateRow(parseInt(e.target.dataset.index)); } });
     });
 }
 
-// Recalculate percentage and buffer for a specific row
 function recalculateRow(index) {
     const attendedInput = document.querySelector(`input[data-type="attended"][data-index="${index}"]`);
     const totalInput = document.querySelector(`input[data-type="total"][data-index="${index}"]`);
-    
     if (!attendedInput || !totalInput) return;
-    
     let attended = parseInt(attendedInput.value) || 0;
     let total = parseInt(totalInput.value) || 0;
-    
-    // Validation: Attended cannot exceed Total
-    if (attended > total && total > 0) {
-        attended = total;
-        attendedInput.value = attended;
-    }
-    
-    // Update the data in memory
-    if (currentAttendanceData && currentAttendanceData[index]) {
-        currentAttendanceData[index].attended = attended;
-        currentAttendanceData[index].total = total;
-    }
-    
-    // Calculate percentage
+    if (attended > total && total > 0) { attended = total; attendedInput.value = attended; }
+    if (currentAttendanceData && currentAttendanceData[index]) { currentAttendanceData[index].attended = attended; currentAttendanceData[index].total = total; }
     const percentage = total > 0 ? Math.round((attended / total) * 100 * 100) / 100 : 0;
-    
-    // Get current threshold
     const threshold = ThresholdManager.getThreshold();
-    
-    // Calculate skippable
     let skippable;
-    if (total === 0) {
-        skippable = 0;
-    } else {
-        const currentPercentage = (attended / total) * 100;
-        if (currentPercentage >= threshold) {
-            skippable = Math.floor((attended * 100 / threshold) - total);
-        } else {
-            const needed = Math.ceil((threshold * total - 100 * attended) / (100 - threshold));
-            skippable = -needed;
-        }
-    }
-    
-    // Update the row
+    if (total === 0) { skippable = 0; } else { const currentPercentage = (attended / total) * 100; if (currentPercentage >= threshold) { skippable = Math.floor((attended * 100 / threshold) - total); } else { const needed = Math.ceil((threshold * total - 100 * attended) / (100 - threshold)); skippable = -needed; } }
     const row = document.querySelector(`tr[data-row-index="${index}"]`);
     if (!row) return;
-    
     const percentageCell = row.querySelector('.percentage-cell');
     const skippableCell = row.querySelector('.skippable-cell');
-    
-    if (percentageCell) {
-        percentageCell.textContent = `${percentage}%`;
-    }
-    
+    if (percentageCell) { percentageCell.textContent = `${percentage}%`; }
     if (skippableCell) {
         let skippableHtml;
-        if (skippable > 0) {
-            skippableHtml = `<span class="skippable-skip">✔ Skip ${skippable}</span>`;
-        } else if (skippable < 0) {
-            const need = Math.abs(skippable);
-            skippableHtml = `<span class="skippable-need">✘ Need ${need}</span>`;
-        } else {
-            skippableHtml = '0';
-        }
+        if (skippable > 0) skippableHtml = `<span class="skippable-skip">✔ Skip ${skippable}</span>`;
+        else if (skippable < 0) { const need = Math.abs(skippable); skippableHtml = `<span class="skippable-need">✘ Need ${need}</span>`; }
+        else skippableHtml = '0';
         skippableCell.innerHTML = skippableHtml;
     }
-    
-    // Update the chart
-    if (currentAttendanceData) {
-        generateAttendanceChart(currentAttendanceData, threshold);
-    }
+    if (currentAttendanceData) { generateAttendanceChart(currentAttendanceData, threshold); }
 }
 
-// Display attendance data
 function displayAttendance(data) {
-    if (!data || !data.attendance || data.attendance.length === 0) {
-        resultDiv.innerHTML = "<p>No attendance data available.</p>";
-        return;
-    }
-
-    // Parse raw data before processing
+    if (!data || !data.attendance || data.attendance.length === 0) { resultDiv.innerHTML = "<p>No attendance data available.</p>"; return; }
     const parsedData = parseAttendanceData(data);
-
-    // Store data globally for threshold updates
     currentAttendanceData = parsedData.attendance;
-    const initialThreshold = ThresholdManager.getThreshold(); // Get saved threshold
-
-    // Show the navbar threshold control and set initial values
+    const initialThreshold = ThresholdManager.getThreshold();
     const navbarThreshold = document.getElementById('navbar-threshold');
     const thresholdSlider = document.getElementById('threshold-slider');
     const thresholdDisplay = document.getElementById('threshold-display');
-    
-    if (navbarThreshold && thresholdSlider && thresholdDisplay) {
-        navbarThreshold.style.display = 'block';
-        thresholdSlider.value = initialThreshold;
-        thresholdDisplay.textContent = `${initialThreshold}%`;
-    }
+    if (navbarThreshold && thresholdSlider && thresholdDisplay) { navbarThreshold.style.display = 'block'; thresholdSlider.value = initialThreshold; thresholdDisplay.textContent = `${initialThreshold}%`; }
 
     let html = `
-        <div class="chart-container">
-            <canvas id="attendanceChart" width="400" height="200"></canvas>
-        </div>
-        <div class="table-container">
-            <table id="attendance-table">
-                <thead>
-                    <tr>
-                        <th>Subject</th>
-                        <th>Attended</th>
-                        <th>Total</th>
-                        <th>Percent</th>
-                        <th>Buffer</th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
+        <div class="chart-container"><canvas id="attendanceChart" width="400" height="200"></canvas></div>
+        <div class="table-container"><table id="attendance-table"><thead><tr><th>Subject</th><th>Attended</th><th>Total</th><th>Percent</th><th>Buffer</th></tr></thead><tbody>`;
 
     parsedData.attendance.forEach((item, index) => {
-        // Render skippable cell with contextual badge
         let skippableHtml;
-        if (item.skippable > 0) {
-            skippableHtml = `<span class="skippable-skip">✔ Skip ${item.skippable}</span>`;
-        } else if (item.skippable < 0) {
-            const need = Math.abs(item.skippable);
-            skippableHtml = `<span class="skippable-need">✘ Need ${need}</span>`;
-        } else {
-            skippableHtml = '0';
-        }
+        if (item.skippable > 0) skippableHtml = `<span class="skippable-skip">✔ Skip ${item.skippable}</span>`;
+        else if (item.skippable < 0) { const need = Math.abs(item.skippable); skippableHtml = `<span class="skippable-need">✘ Need ${need}</span>`; }
+        else skippableHtml = '0';
 
         html += `
             <tr data-row-index="${index}">
@@ -610,157 +565,66 @@ function displayAttendance(data) {
 
     html += `</tbody></table></div>`;
     resultDiv.innerHTML = html;
-    
-    // Add event listeners for input controls
     attachInputControlListeners();
-    
-    // Generate the chart after the HTML is inserted
     generateAttendanceChart(parsedData.attendance);
 }
 
-// Threshold change handler function
-function handleThresholdChange(e) {
-    updateThreshold(parseInt(e.target.value));
-}
+function handleThresholdChange(e) { updateThreshold(parseInt(e.target.value)); }
 
-// Update UI based on login state
 function updateUIForLoggedInState() {
     const isLoggedIn = Auth.isLoggedIn();
     const navbarThreshold = document.getElementById('navbar-threshold');
-    
     form.style.display = isLoggedIn ? 'none' : 'block';
     logoutBtn.style.display = isLoggedIn ? 'block' : 'none';
-    
-    // Show/hide threshold control based on login state
-    if (navbarThreshold) {
-        navbarThreshold.style.display = isLoggedIn ? 'block' : 'none';
-    }
+    if (navbarThreshold) { navbarThreshold.style.display = isLoggedIn ? 'block' : 'none'; }
     const githubLink = document.getElementById('github-link');
-    if (githubLink) {
-        githubLink.style.display = isLoggedIn ? 'none' : 'inline-flex';
-    }
-
-    // Show/hide the informational "how it works" box for non-logged-in users
-    // Only show it if user has never used the app (no saved credentials or threshold)
+    if (githubLink) { githubLink.style.display = isLoggedIn ? 'none' : 'inline-flex'; }
     const howBox = document.getElementById('how-it-works');
-    if (howBox) {
-        const hasSavedData = Cookies.get('srn') || Cookies.get('password') || Cookies.get('threshold');
-        howBox.style.display = (isLoggedIn || hasSavedData) ? 'none' : 'block';
-    }
+    if (howBox) { const hasSavedData = Cookies.get('srn') || Cookies.get('password') || Cookies.get('threshold'); howBox.style.display = (isLoggedIn || hasSavedData) ? 'none' : 'block'; }
+    if (!isLoggedIn) { resultDiv.innerHTML = ''; }
 
-    if (!isLoggedIn) {
-        resultDiv.innerHTML = '';
+    // If the form is hidden (no login fields visible) and we don't already have results
+    try {
+        const formEl = document.querySelector('.form-wrapper');
+        const resultEmpty = !resultDiv || resultDiv.innerHTML.trim() === '';
+        const formHidden = !formEl || getComputedStyle(formEl).display === 'none';
+        if (formHidden && resultEmpty && !isProcessing && !stage2Shown) {
+            // show loader immediately but don't await
+            showStage2Loader().catch(() => {});
+        }
+    } catch (e) {
+        // ignore any errors from computed style
     }
 }
 
-// Cookie management
 const Cookies = {
-    set: (name, value, days) => {
-        const date = new Date();
-        date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-        document.cookie = `${name}=${value};expires=${date.toUTCString()};path=/`;
-    },
-
-    get: (name) => {
-        const value = `; ${document.cookie}`;
-        const parts = value.split(`; ${name}=`);
-        if (parts.length === 2) return parts.pop().split(';').shift();
-        return null;
-    },
-
-    delete: (name) => {
-        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
-    },
-
-    deleteAll: () => {
-        // Get all cookies and delete them
-        const cookies = document.cookie.split(";");
-        for (let cookie of cookies) {
-            const eqPos = cookie.indexOf("=");
-            const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
-            if (name) {
-                Cookies.delete(name);
-            }
-        }
-    }
+    set: (name, value, days) => { const date = new Date(); date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000)); document.cookie = `${name}=${value};expires=${date.toUTCString()};path=/`; },
+    get: (name) => { const value = `; ${document.cookie}`; const parts = value.split(`; ${name}=`); if (parts.length === 2) return parts.pop().split(';').shift(); return null; },
+    delete: (name) => { document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`; },
+    deleteAll: () => { const cookies = document.cookie.split(";"); for (let cookie of cookies) { const eqPos = cookie.indexOf("="); const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim(); if (name) { Cookies.delete(name); } } }
 };
 
-const ThresholdManager = {
-    getThreshold: () => {
-        const saved = Cookies.get('threshold');
-        return saved ? parseInt(saved) : 75;
-    },
+const ThresholdManager = { getThreshold: () => { const saved = Cookies.get('threshold'); return saved ? parseInt(saved) : 75; }, saveThreshold: (threshold) => { Cookies.set('threshold', threshold.toString(), 365); } };
 
-    saveThreshold: (threshold) => {
-        Cookies.set('threshold', threshold.toString(), 365);
-    }
-};
-
-// Authentication management
 const Auth = {
-    credentials: {
-        srn: null,
-        password: null
-    },
-
-    loadFromCookies: () => {
-        const srn = Cookies.get('srn');
-        const password = Cookies.get('password');
-
-        if (srn && password) {
-            Auth.credentials.srn = srn;
-            Auth.credentials.password = password;
-            return true;
-        }
-        return false;
-    },
-
-    save: (srn, password) => {
-        // Store in memory
-        Auth.credentials.srn = srn.toUpperCase();
-        Auth.credentials.password = password;
-
-        // Store in cookies
-        Cookies.set('srn', srn.toUpperCase(), 365);
-        Cookies.set('password', password, 365);
-    },
-
-    clear: () => {
-        Auth.credentials.srn = null;
-        Auth.credentials.password = null;
-        Cookies.delete('srn');
-        Cookies.delete('password');
-        Cookies.delete('threshold');
-    },
-
-    isLoggedIn: () => {
-        return Boolean(Auth.credentials.srn && Auth.credentials.password);
-    }
+    credentials: { srn: null, password: null },
+    loadFromCookies: () => { const srn = Cookies.get('srn'); const password = Cookies.get('password'); if (srn && password) { Auth.credentials.srn = srn; Auth.credentials.password = password; return true; } return false; },
+    save: (srn, password) => { Auth.credentials.srn = srn.toUpperCase(); Auth.credentials.password = password; Cookies.set('srn', srn.toUpperCase(), 365); Cookies.set('password', password, 365); },
+    clear: () => { Auth.credentials.srn = null; Auth.credentials.password = null; Cookies.delete('srn'); Cookies.delete('password'); Cookies.delete('threshold'); },
+    isLoggedIn: () => { return Boolean(Auth.credentials.srn && Auth.credentials.password); }
 };
 
-// Validate SRN format
-function validateSRN(srn) {
-    // If regex isn't ready yet, allow validation (will be checked later),
-    // but mark non-empty SRNs as tentatively valid so UX isn't blocked.
-    if (!SRN_REGEX) return true;
-    return SRN_REGEX.test(srn.toUpperCase());
-}
+function validateSRN(srn) { if (!SRN_REGEX) return true; return SRN_REGEX.test(srn.toUpperCase()); }
 
-// Check SRN validity and update UI
 function checkSRNValidity() {
     const srn = srnInput.value.toUpperCase();
     const isValid = validateSRN(srn);
-
     if (srn && !isValid) {
         srnInput.classList.add('invalid');
         submitButton.disabled = true;
-
-        // Show message when user types full 13 characters
         if (srn.length === 13) {
             logMessage("SRN not in mapping: open a PR on GitHub", "error");
-            setTimeout(() => {
-                window.location.href = "https://github.com/polarhive/attend";
-            }, 2000);
+            setTimeout(() => { window.location.href = "https://github.com/polarhive/attend"; }, 2000);
         }
     } else {
         srnInput.classList.remove('invalid');
@@ -768,100 +632,39 @@ function checkSRNValidity() {
     }
 }
 
-// Handle form submission
 async function fetchAttendance(srn, password) {
-    if (isProcessing) {
-        logMessage("Request already in progress", "error");
-        return;
-    }
-
-    // Check if offline
-    if (isOffline) {
-        logMessage("You are offline. Cannot fetch new attendance data.", "error");
-        return;
-    }
-
+    if (isProcessing) { logMessage("Request already in progress", "error"); return; }
+    if (isOffline) { logMessage("You are offline. Cannot fetch new attendance data.", "error"); return; }
     try {
         clearLogs();
         setLoadingState(true);
         isProcessing = true;
-        
-        // Clear loading logs
-        const loadingLogs = document.getElementById('loading-logs');
-        if (loadingLogs) {
-            loadingLogs.innerHTML = '';
-        }
-
-        // Validate SRN before sending
-        if (!validateSRN(srn)) {
-            logMessage("Invalid SRN format", "error");
-            setLoadingState(false);
-            isProcessing = false;
-            return;
-        }
+        const loadingLogs = document.getElementById('loading-logs'); if (loadingLogs) { loadingLogs.innerHTML = ''; }
+        if (!validateSRN(srn)) { logMessage("Invalid SRN format", "error"); setLoadingState(false); isProcessing = false; return; }
 
         logMessage(`Initiating attendance fetch for ${srn}`, "info");
         logMessage("Validating credentials...", "info");
         logMessage("Connecting to PESU Academy...", "info");
-
-        // Start timing the request
         const requestStartTime = performance.now();
 
-        // Make HTTP request to the attendance endpoint
-        const response = await fetch('/api/attendance', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache',
-                'Expires': '0'
-            },
-            body: JSON.stringify({
-                username: srn,
-                password: password
-            })
-        });
+        const response = await fetch('/api/attendance', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' }, body: JSON.stringify({ username: srn, password: password }) });
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            const errorMessage = errorData.error?.details || errorData.message || `HTTP error! status: ${response.status}`;
-            throw new Error(errorMessage);
-        }
+        if (!response.ok) { const errorData = await response.json(); const errorMessage = errorData.error?.details || errorData.message || `HTTP error! status: ${response.status}`; throw new Error(errorMessage); }
 
         const data = await response.json();
-        
-        if (!data.success) {
-            throw new Error(data.error?.details || data.message || "Unknown error from server");
-        }
-        
-        // Calculate request duration
+        if (!data.success) { throw new Error(data.error?.details || data.message || "Unknown error from server"); }
         const requestEndTime = performance.now();
         const requestDuration = requestEndTime - requestStartTime;
-        
-        // Format duration for display
-        let durationText;
-        if (requestDuration >= 1000) {
-            durationText = `${(requestDuration / 1000).toFixed(1)} seconds`;
-        } else {
-            durationText = `${Math.round(requestDuration)}ms`;
-        }
-        
+        let durationText; if (requestDuration >= 1000) durationText = `${(requestDuration / 1000).toFixed(1)} seconds`; else durationText = `${Math.round(requestDuration)}ms`;
         logMessage(`✓ Server responded in ${durationText}`, "info");
         logMessage(`✓ Parsing attendance data...`, "info");
-        
-        const attendanceData = {
-            attendance: data.data.attendance || data.data
-        };
-        
+        const attendanceData = { attendance: data.data.attendance || data.data };
         logMessage(`✓ Found ${attendanceData.attendance.length} subjects`, "info");
-        
-        // Save credentials and display results
         Auth.save(srn, password);
         logMessage(`✓ Rendering attendance visualization...`, "info");
         displayAttendance(attendanceData);
         updateUIForLoggedInState();
         logMessage(`✓ All done! Attendance loaded successfully`, "info");
-
     } catch (error) {
         logMessage(`Error: ${error.message}`, "error");
         Auth.clear();
@@ -871,80 +674,61 @@ async function fetchAttendance(srn, password) {
     }
 }
 
-// Handle logout
-function logout() {
-    Auth.clear();
-    Cookies.deleteAll(); // Clear all cookies
-    location.reload();
-}
+function logout() { Auth.clear(); Cookies.deleteAll(); location.reload(); }
 
-// Clean URL parameters
-function cleanUrlParameters() {
-    if (window.location.search) {
-        const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
-        window.history.replaceState({}, document.title, cleanUrl);
-    }
-}
+function cleanUrlParameters() { if (window.location.search) { const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname; window.history.replaceState({}, document.title, cleanUrl); } }
 
-// Form submission
-form.addEventListener('submit', (e) => {
+form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const srn = srnInput.value.toUpperCase();
     const password = document.getElementById('password').value;
-
-    if (!validateSRN(srn)) {
-        logMessage("Invalid SRN format", "error");
-        return;
-    }
-
-    // Clean URL parameters
+    if (!validateSRN(srn)) { logMessage("Invalid SRN format", "error"); return; }
     cleanUrlParameters();
-    
-    // Fetch attendance data
-    fetchAttendance(srn, password);
+
+    // Stage 1 -> Stage 2: fade out login and show loader immediately below navbar
+    const formWrapper = document.querySelector('.form-wrapper');
+    await fadeOutElement(formWrapper, 220);
+    await showStage2Loader();
+
+    // Fetch and then reveal results
+    await fetchAttendance(srn, password);
+    await showStage3Result();
 });
-
-// SRN input validation
 srnInput.addEventListener('input', checkSRNValidity);
-
-// Logout button
 logoutBtn.addEventListener('click', logout);
 
-// Threshold slider (global listener)
 const thresholdSlider = document.getElementById('threshold-slider');
-if (thresholdSlider) {
-    thresholdSlider.addEventListener('input', handleThresholdChange);
-}
+if (thresholdSlider) { thresholdSlider.addEventListener('input', handleThresholdChange); }
 
-// Check cookies once and initialize UI appropriately
 (function initializeApp() {
     const hasSavedCredentials = document.cookie.includes('srn=') && document.cookie.includes('password=');
-    
     if (hasSavedCredentials) {
-        // Show loading state immediately (before DOMContentLoaded)
         setLoadingState(true);
-        
-        // Hide form and info box immediately
         document.addEventListener('DOMContentLoaded', () => {
             const formWrapper = document.querySelector('.form-wrapper');
             const howBox = document.getElementById('how-it-works');
-            
             if (formWrapper) formWrapper.style.display = 'none';
             if (howBox) howBox.style.display = 'none';
         });
     }
-    
-    window.addEventListener('load', () => {
-        // Load mapping.json and build SRN regex before user interaction
+
+    window.addEventListener('load', async () => {
         loadMappingAndBuildRegex();
         cleanUrlParameters();
-
-        // Use the saved credentials check result
         if (hasSavedCredentials && Auth.loadFromCookies()) {
+            // Auto-login flow: fade out the form, show loader, fetch, then show results
             updateUIForLoggedInState();
-            // Auto-fetch attendance if user was previously logged in
-            if (Auth.credentials.srn && Auth.credentials.password) {
-                fetchAttendance(Auth.credentials.srn, Auth.credentials.password);
+            const formWrapper = document.querySelector('.form-wrapper');
+            try {
+                if (formWrapper) await fadeOutElement(formWrapper, 200);
+                await showStage2Loader();
+                if (Auth.credentials.srn && Auth.credentials.password) {
+                    await fetchAttendance(Auth.credentials.srn, Auth.credentials.password);
+                    await showStage3Result();
+                }
+            } catch (e) {
+                // fallback to default UI if anything fails
+                updateUIForLoggedInState();
             }
         } else {
             updateUIForLoggedInState();
@@ -952,48 +736,36 @@ if (thresholdSlider) {
     });
 })();
 
-// Handle navigation events
-window.addEventListener('popstate', () => {
-    updateUIForLoggedInState();
-});
+window.addEventListener('popstate', () => { updateUIForLoggedInState(); });
 
-// Service Worker Registration for offline caching
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', function() {
         navigator.serviceWorker.register('/sw.js')
             .then(function(registration) {
-                // Check for service worker updates
                 registration.addEventListener('updatefound', function() {
                     const newWorker = registration.installing;
                     newWorker.addEventListener('statechange', function() {
                         if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                            // New service worker is available, show update notification
                             logMessage('App updated! Refresh to get the latest version.', 'info');
                         }
                     });
                 });
             })
-            .catch(function(err) {
-                logMessage('ServiceWorker registration failed', 'error');
-            });
+            .catch(function(err) { logMessage('ServiceWorker registration failed', 'error'); });
     });
 }
 
-// Online/Offline status monitoring
 window.addEventListener('online', function() {
     isOffline = false;
-    offlineIndicator.classList.remove('show');
+    hideOfflineBanner();
+    offlineIndicator.style.display = 'none';
     logMessage('Back online! You can fetch new attendance data.', 'info');
 });
 
 window.addEventListener('offline', function() {
     isOffline = true;
-    offlineIndicator.classList.add('show');
+    showOfflineBanner().catch(() => {});
     logMessage('You are offline. App will work with cached data.', 'info');
 });
 
-// Check initial online status
-if (!navigator.onLine) {
-    isOffline = true;
-    offlineIndicator.classList.add('show');
-}
+if (!navigator.onLine) { isOffline = true; showOfflineBanner().catch(() => { offlineIndicator.style.display = 'block'; }); }

@@ -1,5 +1,5 @@
 // Service Worker for caching attendance tracker assets
-const CACHE_NAME = 'attendance-tracker-v5';
+const CACHE_NAME = 'attendance-tracker-v6';
 const urlsToCache = [
   '/',
   '/i.js',
@@ -12,13 +12,13 @@ const urlsToCache = [
 ];
 
 // Install event - cache the assets
-self.addEventListener('install', function(event) {
+self.addEventListener('install', function (event) {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(function(cache) {
+      .then(function (cache) {
         return cache.addAll(urlsToCache);
       })
-      .then(function() {
+      .then(function () {
         // Force the waiting service worker to become the active service worker
         return self.skipWaiting();
       })
@@ -26,17 +26,17 @@ self.addEventListener('install', function(event) {
 });
 
 // Activate event - clean up old caches
-self.addEventListener('activate', function(event) {
+self.addEventListener('activate', function (event) {
   event.waitUntil(
-    caches.keys().then(function(cacheNames) {
+    caches.keys().then(function (cacheNames) {
       return Promise.all(
-        cacheNames.map(function(cacheName) {
+        cacheNames.map(function (cacheName) {
           if (cacheName !== CACHE_NAME) {
             return caches.delete(cacheName);
           }
         })
       );
-    }).then(function() {
+    }).then(function () {
       // Ensure the service worker takes control of all clients immediately
       return self.clients.claim();
     })
@@ -44,17 +44,17 @@ self.addEventListener('activate', function(event) {
 });
 
 // Fetch event - serve from cache when possible
-self.addEventListener('fetch', function(event) {
+self.addEventListener('fetch', function (event) {
   const requestUrl = new URL(event.request.url);
-  
+
   // Handle API requests differently - always try network first for fresh data
   if (requestUrl.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(event.request)
-        .then(function(response) {
+        .then(function (response) {
           return response;
         })
-        .catch(function(error) {
+        .catch(function (error) {
           // Could return a cached error page or default response here
           throw error;
         })
@@ -65,14 +65,14 @@ self.addEventListener('fetch', function(event) {
   // For all other requests, try cache first, then network
   event.respondWith(
     caches.match(event.request)
-      .then(function(response) {
+      .then(function (response) {
         // Return cached version if available
         if (response) {
           return response;
         }
 
         // Otherwise fetch from network
-        return fetch(event.request).then(function(response) {
+        return fetch(event.request).then(function (response) {
           // Don't cache if not a valid response
           if (!response || response.status !== 200 || response.type !== 'basic') {
             return response;
@@ -82,7 +82,7 @@ self.addEventListener('fetch', function(event) {
           const responseToCache = response.clone();
 
           caches.open(CACHE_NAME)
-            .then(function(cache) {
+            .then(function (cache) {
               cache.put(event.request, responseToCache);
             });
 
@@ -93,7 +93,7 @@ self.addEventListener('fetch', function(event) {
 });
 
 // Handle service worker updates
-self.addEventListener('message', function(event) {
+self.addEventListener('message', function (event) {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }

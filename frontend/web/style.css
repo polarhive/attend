@@ -162,6 +162,23 @@ body {
     min-height: 32px;
 }
 
+/* Make the small red logout button compact inside navbar */
+.navbar .btn-secondary {
+    padding: 6px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.navbar .btn-secondary svg {
+    width: 16px;
+    height: 16px;
+}
+
 .navbar .threshold-control[style*="display: block"],
 .navbar .threshold-control[style*="display: flex"] {
     display: flex !important;
