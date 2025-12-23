@@ -32,11 +32,14 @@ import subprocess
 import atexit
 import sys
 
+
 class APIResponse:
     """Standardized API response wrapper for all clients (web, bot, CLI, etc.)"""
-    
+
     @staticmethod
-    def success(data: Any, code: str = "success", message: str = "Operation successful") -> Dict[str, Any]:
+    def success(
+        data: Any, code: str = "success", message: str = "Operation successful"
+    ) -> Dict[str, Any]:
         """Return standardized success response"""
         return {
             "success": True,
@@ -45,9 +48,11 @@ class APIResponse:
             "data": data,
             "timestamp": time.time(),
         }
-    
+
     @staticmethod
-    def error(error_type: str, details: str, code: str = "error", status_code: int = 400) -> tuple[Dict[str, Any], int]:
+    def error(
+        error_type: str, details: str, code: str = "error", status_code: int = 400
+    ) -> tuple[Dict[str, Any], int]:
         """Return standardized error response with HTTP status"""
         response = {
             "success": False,
@@ -66,8 +71,10 @@ class APIResponse:
 # CONFIGURATION AND SETTINGS
 # ============================================================================
 
+
 class ConfigurationError(Exception):
     """Raised when configuration loading or validation fails."""
+
     pass
 
 
@@ -96,7 +103,7 @@ class MappingsConfig:
         # Normalize keys to remove leading 'PES' for pattern building
         normalized = []
         for k in keys:
-            if k.startswith('PES'):
+            if k.startswith("PES"):
                 normalized.append(k[3:])
             else:
                 normalized.append(k)
@@ -161,7 +168,13 @@ class AppSettings:
     def __init__(self):
         try:
             from dotenv import load_dotenv
-            load_dotenv()
+            from pathlib import Path
+
+            # Load .env.local if it exists, otherwise fall back to .env
+            if Path(".env.local").exists():
+                load_dotenv(".env.local")
+            else:
+                load_dotenv()
         except Exception:
             pass
 
@@ -170,9 +183,19 @@ class AppSettings:
         self.DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
         self.REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 5))
         # Backend feature toggles
-        self.ENABLE_BACKEND_API = os.getenv("ENABLE_BACKEND_API", "true").lower() in ("1", "true", "yes")
-        self.ENABLE_BACKEND_WEB = os.getenv("ENABLE_BACKEND_WEB", "true").lower() in ("1", "true", "yes")
-        self.ENABLE_BACKEND_TELEGRAM = os.getenv("ENABLE_BACKEND_TELEGRAM", "false").lower() in ("1", "true", "yes")
+        self.ENABLE_BACKEND_API = os.getenv("ENABLE_BACKEND_API", "true").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self.ENABLE_BACKEND_WEB = os.getenv("ENABLE_BACKEND_WEB", "true").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self.ENABLE_BACKEND_TELEGRAM = os.getenv(
+            "ENABLE_BACKEND_TELEGRAM", "false"
+        ).lower() in ("1", "true", "yes")
 
 
 def load_mappings_config() -> MappingsConfig:
@@ -187,7 +210,9 @@ def load_mappings_config() -> MappingsConfig:
             with web_config.open("r", encoding="utf-8") as f:
                 config_data = json.load(f)
         except json.JSONDecodeError as error:
-            raise ConfigurationError(f"Invalid JSON format in configuration file: {error}")
+            raise ConfigurationError(
+                f"Invalid JSON format in configuration file: {error}"
+            )
 
         return MappingsConfig(config_data)
 
@@ -208,11 +233,12 @@ def load_app_settings() -> AppSettings:
 # LOGGING SETUP
 # ============================================================================
 
+
 def setup_logger(name=None, level=None, format_str=None):
     """Set up a logger with console output."""
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     default_format = "%(asctime)s - %(levelname)s - %(message)s"
-    
+
     logger = logging.getLogger(name)
     logger.setLevel(level or log_level)
 
@@ -235,13 +261,16 @@ def setup_logger(name=None, level=None, format_str=None):
 # PESU ACADEMY SCRAPER
 # ============================================================================
 
+
 class AuthenticationError(Exception):
     """Raised when authentication with PESU Academy fails."""
+
     pass
 
 
 class AttendanceScrapingError(Exception):
     """Raised when attendance data scraping encounters an error."""
+
     pass
 
 
@@ -553,7 +582,7 @@ except ConfigurationError as e:
 app = FastAPI(
     title="PESU Academy Attendance Tracker",
     description="Fetch and analyze student attendance data from PESUAcademy",
-    version="1.0.0"
+    version="1.0.0",
 )
 router = APIRouter()
 
@@ -563,7 +592,7 @@ async def healthcheck() -> Dict[str, Any]:
     return APIResponse.success(
         data={"status": "healthy"},
         code="healthcheck_ok",
-        message="Service is healthy and operational"
+        message="Service is healthy and operational",
     )
 
 
@@ -578,7 +607,7 @@ async def get_attendance(request: dict = Body(...)) -> dict:
                 error_type="ValidationError",
                 details="username and password are required",
                 code="missing_credentials",
-                status_code=400
+                status_code=400,
             )
             raise HTTPException(status_code=status_code, detail=response)
 
@@ -587,7 +616,7 @@ async def get_attendance(request: dict = Body(...)) -> dict:
         return APIResponse.success(
             data=result,
             code="attendance_retrieved",
-            message=f"Attendance data retrieved for {username}"
+            message=f"Attendance data retrieved for {username}",
         )
 
     except ConfigurationError as error:
@@ -596,43 +625,45 @@ async def get_attendance(request: dict = Body(...)) -> dict:
             error_type="ConfigurationError",
             details=str(error),
             code="config_error",
-            status_code=500
+            status_code=500,
         )
         raise HTTPException(status_code=status_code, detail=response)
-    
+
     except AuthenticationError as error:
         app_logger.warning(f"Authentication failed: {error}")
         response, status_code = APIResponse.error(
             error_type="AuthenticationError",
             details=str(error),
             code="auth_failed",
-            status_code=401
+            status_code=401,
         )
         raise HTTPException(status_code=status_code, detail=response)
-    
+
     except AttendanceScrapingError as error:
         app_logger.error(f"Scraping error: {error}")
         response, status_code = APIResponse.error(
             error_type="ScrapingError",
             details=str(error),
             code="scraping_failed",
-            status_code=500
+            status_code=500,
         )
         raise HTTPException(status_code=status_code, detail=response)
-    
+
     except Exception as error:
         app_logger.error(f"Unexpected error: {error}")
         response, status_code = APIResponse.error(
             error_type="UnexpectedError",
             details=str(error),
             code="internal_error",
-            status_code=500
+            status_code=500,
         )
         raise HTTPException(status_code=status_code, detail=response)
 
 
 # Include API routes and mount static files
 app.include_router(router, prefix="/api")
+
+
 # Serve single authoritative mapping.json from repo root for frontend requests
 @app.get("/mapping.json", include_in_schema=False)
 async def serve_mapping_json():
@@ -659,10 +690,12 @@ async def serve_mapping_json():
         )
         return JSONResponse(content=payload, status_code=status_code)
 
+
 if settings.ENABLE_BACKEND_WEB:
     app.mount("/", StaticFiles(directory="frontend/web", html=True), name="frontend")
 else:
     app_logger.info("Frontend static files mount disabled (ENABLE_BACKEND_WEB=false)")
+
     # Provide helpful root response when frontend static files are disabled
     @app.get("/", include_in_schema=False)
     async def frontend_disabled_root():
@@ -676,8 +709,12 @@ else:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def frontend_disabled_catchall(full_path: str):
-        # Do not override API routes - they are defined under /api prefix and take precedence.
-        if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("openapi.json") or full_path.startswith("redoc"):
+        if (
+            full_path.startswith("api")
+            or full_path.startswith("docs")
+            or full_path.startswith("openapi.json")
+            or full_path.startswith("redoc")
+        ):
             response_payload, status_code = APIResponse.error(
                 error_type="NotFound",
                 details=f"Path '/{full_path}' not found",
@@ -701,13 +738,24 @@ if __name__ == "__main__":
     bot_proc = None
     try:
         if settings.ENABLE_BACKEND_TELEGRAM:
-            tg_bot_path = Path(__file__).resolve().parent / "frontend" / "telegram" / "tg_bot.py"
+            telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+            if not telegram_bot_token:
+                print(
+                    "ERROR: ENABLE_BACKEND_TELEGRAM is enabled but TELEGRAM_BOT_TOKEN is not set in .env"
+                )
+                print(
+                    "Please add TELEGRAM_BOT_TOKEN to your .env file or disable the Telegram bot."
+                )
+                sys.exit(1)
+
+            tg_bot_path = (
+                Path(__file__).resolve().parent / "frontend" / "telegram" / "tg_bot.py"
+            )
             if tg_bot_path.exists():
                 cmd = [sys.executable, str(tg_bot_path)]
-                # Inherit current environment so .env and other vars propagate
                 env = os.environ.copy()
-                # Start bot subprocess in its own session so signals don't immediately kill both
                 bot_proc = subprocess.Popen(cmd, env=env, start_new_session=True)
+
                 def _terminate_bot():
                     try:
                         if bot_proc and bot_proc.poll() is None:
@@ -718,10 +766,13 @@ if __name__ == "__main__":
                             bot_proc.kill()
                         except Exception:
                             pass
+
                 atexit.register(_terminate_bot)
                 print(f"Started telegram bot subprocess (pid={bot_proc.pid})")
             else:
-                print(f"Telegram bot file not found at: {tg_bot_path}, skipping bot start")
+                print(
+                    f"Telegram bot file not found at: {tg_bot_path}, skipping bot start"
+                )
 
         # Optionally start the web server.
         # Set ENABLE_BACKEND_WEB=1 (or true) in the environment to enable.
@@ -729,8 +780,12 @@ if __name__ == "__main__":
             if settings.ENABLE_BACKEND_WEB:
                 print(f"Starting web + API server on port {settings.PORT}...")
             else:
-                print(f"Starting API server (frontend disabled) on port {settings.PORT}...")
-            uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=settings.DEBUG)
+                print(
+                    f"Starting API server (frontend disabled) on port {settings.PORT}..."
+                )
+            uvicorn.run(
+                "main:app", host="0.0.0.0", port=settings.PORT, reload=settings.DEBUG
+            )
         else:
             print("API server disabled (ENABLE_BACKEND_API set to false)")
             if bot_proc:

@@ -32,3 +32,5 @@ data/
 .DS_Store
 Thumbs.db
 results.json
+.vercel
+.env*.local
