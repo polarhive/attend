@@ -3,11 +3,10 @@
     "ACTION_TYPE": 8,
     "MENU_ID": 660,
     "BATCH_CLASS_ID_MAPPING": {
-        "PES2UG23AM": 2970,
-        "PES2UG23CS": 2968,
-        "PES2UG23EC": 2965,
-        "PES2UG24CS": 2969,
-        "PES2UG25CS": [2972, 2973]
+        "PES2UG25CS": [
+            2972,
+            2973
+        ]
     },
     "SUBJECT_MAPPING": {
         "UE23CS241B": "DAA",
@@ -68,5 +67,5 @@
         "UE25PH151A": "Physics",
         "UE25PH151A(LAB)": "Physics LAB",
         "UZ23UZ221B": "CIE"
-    }   
+    }
 }
