@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Union, Any
 import uvicorn
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 from fastapi import FastAPI, APIRouter, HTTPException, status, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
@@ -83,7 +84,7 @@ class MappingsData:
     controller_mode: int
     action_type: int
     menu_id: int
-    batchClassId: Union[int, List[int]]
+    batchClassId: Optional[Union[int, List[int]]]
     subject_mapping: Dict[str, str]
 
 
@@ -128,12 +129,22 @@ class MappingsConfig:
                 else:
                     parts.append(f"{batch}(?:{'|'.join(branches)})")
 
+        # If no mappings were configured, skip strict SRN validation and
+        # allow runtime discovery of batchClassId after authentication.
         if not parts:
-            raise ValueError("No batch mappings configured to validate SRNs")
-
-        pattern = rf"^PES(?:{'|'.join(parts)})\d{{3}}$"
-        if not re.match(pattern, srn):
-            raise ValueError(f"Invalid SRN format: '{srn}'")
+            # No configured parts to validate against — proceed permissively.
+            pattern = None
+        else:
+            pattern = rf"^PES(?:{'|'.join(parts)})\d{{3}}$"
+            # Only enforce validation when we have a meaningful pattern.
+            if not re.match(pattern, srn):
+                try:
+                    app_logger.debug(
+                        f"SRN '{srn}' does not match configured validation pattern; proceeding permissively"
+                    )
+                except Exception:
+                    pass
+                # Do not raise; allow lookup to proceed and rely on runtime discovery.
 
         # Determine the exact mapping key by checking which configured key the SRN starts with
         full_prefix = None
@@ -142,18 +153,13 @@ class MappingsConfig:
                 full_prefix = k
                 break
 
+        # If the mapping key is not present or its configured value is missing,
+        # do not raise an error here. We will attempt to discover the
+        # appropriate batchClassId dynamically after authentication.
         if full_prefix is None:
-            available_branches = keys
-            raise ValueError(
-                f"Missing batch class ID for SRN prefix derived from '{srn}'. Available: {available_branches}"
-            )
-
-        batch_class_id = self.BATCH_CLASS_ID_MAPPING.get(full_prefix)
-        if batch_class_id is None:
-            available_branches = keys
-            raise ValueError(
-                f"Missing batch class ID for branch '{full_prefix}'. Available: {available_branches}"
-            )
+            batch_class_id = None
+        else:
+            batch_class_id = self.BATCH_CLASS_ID_MAPPING.get(full_prefix)
 
         return MappingsData(
             controller_mode=self.CONTROLLER_MODE,
@@ -279,6 +285,12 @@ class PESUAttendanceScraper:
 
     def __init__(self, username: str, password: str) -> None:
         self.session = requests.Session()
+        # Provide browser-like defaults so the site responds with the same CSRF & cookies
+        self.session.headers.update(
+            {
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+        )
         self.username = username
         self.password = password
 
@@ -290,6 +302,11 @@ class PESUAttendanceScraper:
             self.menu_id = branch_config.menu_id
             self.batch_class_ids = branch_config.batchClassId
             self.subject_mapping = branch_config.subject_mapping
+
+            # Track whether batchClassId(s) were auto-discovered at runtime and
+            # an optional suggestion message to ask the user to open a PR.
+            self._auto_discovered_batch_ids: Optional[List[str]] = None
+            self._pr_suggestion: Optional[str] = None
 
             # Extract branch prefix from username for logging
             # Derive a human-friendly branch prefix for logging by matching the
@@ -310,40 +327,217 @@ class PESUAttendanceScraper:
             raise ConfigurationError(f"Configuration error: {e}")
 
     def _extract_csrf_token(self, html_content: str) -> str:
+        """
+        Extract CSRF token from several possible locations:
+        - <input name="_csrf" value="...">
+        - <meta name="_csrf" content="..."> or common meta tokens
+        - inline JS patterns or UUID-like tokens
+        """
         soup = BeautifulSoup(html_content, "html.parser")
+
+        # 1) standard hidden input
         csrf_input = soup.find("input", {"name": "_csrf"})
+        if csrf_input and csrf_input.get("value"):
+            return csrf_input.get("value")  # type: ignore
 
-        if not csrf_input or not csrf_input.get("value"):  # type: ignore
-            raise AuthenticationError("CSRF token not found in response")
+        # 2) meta tags
+        for meta_name in ("_csrf", "csrf-token", "csrf"):
+            m = soup.find("meta", {"name": meta_name})
+            if m and m.get("content"):
+                return m.get("content")  # type: ignore
 
-        return csrf_input.get("value")  # type: ignore
+        # 3) JS inline assignment e.g. _csrf = 'uuid' or "_csrf":"uuid"
+        m = re.search(
+            r"_csrf['\"]?\s*[:=]\s*['\"]([0-9a-fA-F-]{8,})['\"]", html_content
+        )
+        if m:
+            return m.group(1)
+
+        # 4) fallback: any UUID in page (common CSRF format observed)
+        m2 = re.search(
+            r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+            html_content,
+            re.I,
+        )
+        if m2:
+            return m2.group(1)
+
+        raise AuthenticationError("CSRF token not found in response")
 
     def login(self) -> None:
         app_logger.info("Initiating authentication process")
 
         try:
-            # Get login page and extract CSRF token
+            # GET initial page (login landing) and gather cookies + form
             login_page_url = f"{self.BASE_URL}/"
-            response = self.session.get(login_page_url)
-            response.raise_for_status()
+            r0 = self.session.get(login_page_url, allow_redirects=True, timeout=15)
+            r0.raise_for_status()
 
-            csrf_token = self._extract_csrf_token(response.text)
+            soup = BeautifulSoup(r0.text, "html.parser")
+            # Find the login form (heuristic: form containing j_username or username field)
+            form = None
+            for f in soup.find_all("form"):
+                if f.find("input", {"name": "j_username"}) or f.find(
+                    "input", {"name": "username"}
+                ):
+                    form = f
+                    break
 
-            # Prepare and submit login credentials
-            login_url = f"{self.BASE_URL}/j_spring_security_check"
+            action = None
+            if form and form.get("action"):
+                action = form.get("action")
+            else:
+                action = "/j_spring_security_check"
+
+            if action.startswith("http"):
+                login_url = action
+            else:
+                login_url = urljoin(self.BASE_URL + "/", action.lstrip("/"))
+
+            # Gather form hidden inputs (preserve any extra required fields)
+            form_inputs = {}
+            if form:
+                for inp in form.find_all("input"):
+                    name = inp.get("name")
+                    if not name:
+                        continue
+                    if name in ("j_username", "j_password"):
+                        continue
+                    form_inputs[name] = inp.get("value", "")
+
+            # Determine CSRF to use for login (form value > page token > cookie > existing)
+            form_csrf = form_inputs.get("_csrf")
+            page_csrf = None
+            try:
+                page_csrf = self._extract_csrf_token(r0.text)
+            except AuthenticationError:
+                page_csrf = None
+
+            if form_csrf:
+                csrf_token = form_csrf
+                csrf_source = "form"
+            elif page_csrf:
+                csrf_token = page_csrf
+                csrf_source = "html"
+            else:
+                # cookie-based fallback
+                csrf_token = self.session.cookies.get(
+                    "XSRF-TOKEN"
+                ) or self.session.cookies.get("CSRF-TOKEN")
+                csrf_source = "cookie" if csrf_token else None
+
+            if not csrf_token:
+                raise AuthenticationError(
+                    "Missing CSRF token (no form, html token or cookie)"
+                )
+
             login_payload = {
+                **form_inputs,
+                "_csrf": csrf_token,
                 "j_username": self.username,
                 "j_password": self.password,
-                "_csrf": csrf_token,
             }
 
-            login_response = self.session.post(login_url, data=login_payload)
-            login_response.raise_for_status()
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": "https://www.pesuacademy.com",
+                "Referer": r0.url,
+                "Sec-GPC": "1",
+            }
 
-            # Validate successful authentication
-            self._validate_authentication()
+            app_logger.debug(f"Posting to {login_url} with csrf source={csrf_source}")
+            resp = self.session.post(
+                login_url,
+                data=login_payload,
+                headers=headers,
+                allow_redirects=True,
+                timeout=15,
+            )
+
+            app_logger.debug(
+                f"Login POST status={getattr(resp, 'status_code', None)} url={getattr(resp, 'url', None)}"
+            )
+            app_logger.debug(
+                f"Session cookies after login: {self.session.cookies.get_dict()}"
+            )
+
+            # Heuristic: server sometimes redirects to http landing (which returns 404); if final url uses http, try https equivalent
+            final_resp = resp
+            try:
+                if getattr(resp, "url", "").startswith("http://"):
+                    alt = "https://" + resp.url.split("://", 1)[1]
+                    app_logger.debug(f"Retrying landing URL with https: {alt}")
+                    landing_resp = self.session.get(
+                        alt, allow_redirects=True, timeout=15
+                    )
+                    app_logger.debug(
+                        f"Landing fetch status: {getattr(landing_resp, 'status_code', None)} url={getattr(landing_resp, 'url', None)}"
+                    )
+                    if landing_resp.status_code < 400:
+                        final_resp = landing_resp
+            except Exception:
+                pass
+
+            # Basic detection of failed login via presence of login form or error messages
+            final_body = (final_resp.text or "").lower()
+            if (
+                "j_username" in final_body
+                or "j_spring_security_check" in final_body
+                or ("invalid" in final_body and "login" in final_body)
+            ):
+                raise AuthenticationError(
+                    "Authentication failed: login page or error detected after POST"
+                )
+
+            # Prepare profile context and obtain a ready-to-use CSRF token (reuse final response to avoid extra GET)
+            try:
+                csrf_after = self._prepare_profile_context(initial_response=final_resp)
+            except AuthenticationError:
+                # Fall back to cookie if preparation failed
+                csrf_after = self.session.cookies.get(
+                    "XSRF-TOKEN"
+                ) or self.session.cookies.get("CSRF-TOKEN")
 
             app_logger.info("Authentication successful")
+
+            # If batch class IDs are not configured, attempt to auto-discover them
+            # from the semesters endpoint used by the profile page.
+            if not self.batch_class_ids:
+                try:
+                    fetched = self._fetch_semester_batch_ids(csrf_after)
+                    if fetched:
+                        # Record that these were auto-discovered so the API can
+                        # surface a helpful suggestion to the user.
+                        self._auto_discovered_batch_ids = fetched
+
+                        # Use a single value when only one option is found, else keep the list
+                        self.batch_class_ids = (
+                            fetched if len(fetched) > 1 else fetched[0]
+                        )
+
+                        # Build a concise PR suggestion message that includes the
+                        # SRN prefix (username with trailing digits removed) and the
+                        # discovered batchClassId(s).
+                        try:
+                            prefix = re.sub(r"\d+$", "", self.username)
+                            ids = ",".join(fetched)
+                            msg = (
+                                f"Auto-discovered batchClassId(s) for SRN prefix '{prefix}': {ids}. "
+                                "Consider opening a PR to add this mapping to 'frontend/web/mapping.json' under 'BATCH_CLASS_ID_MAPPING'."
+                            )
+                            self._pr_suggestion = msg
+                        except Exception:
+                            self._pr_suggestion = (
+                                f"Auto-discovered batchClassId(s): {fetched}. "
+                                "Consider opening a PR to add this mapping to 'frontend/web/mapping.json'."
+                            )
+
+                        app_logger.info(
+                            f"Auto-discovered batchClassId(s): {self.batch_class_ids}"
+                        )
+                        app_logger.info(self._pr_suggestion)
+                except Exception as e:
+                    app_logger.debug(f"Auto-discovery of batchClassId failed: {e}")
 
         except requests.RequestException as e:
             raise AuthenticationError(f"Network error during authentication: {e}")
@@ -352,18 +546,37 @@ class PESUAttendanceScraper:
 
     def _validate_authentication(self) -> None:
         profile_url = f"{self.BASE_URL}/s/studentProfilePESU"
-
         try:
-            # Check if we can access protected profile page without redirect
-            profile_response = self.session.get(profile_url, allow_redirects=False)
+            profile_response = self.session.get(
+                profile_url, allow_redirects=True, timeout=15
+            )
+            app_logger.debug(
+                f"Validate profile fetch status={profile_response.status_code} url={profile_response.url}"
+            )
 
-            # If we get a redirect, authentication failed
-            if profile_response.status_code in (302, 301):
-                redirect_location = profile_response.headers.get("Location")
-                if redirect_location:
+            if profile_response.status_code == 200:
+                body = profile_response.text.lower()
+                # Heuristics for successful login
+                if (
+                    "studentprofile" in body
+                    or "logout" in body
+                    or "/a/0" in profile_response.url
+                ):
+                    return
+                # Detect login form indicating failed auth
+                if re.search(r'name=["\']j_username["\']', body):
                     raise AuthenticationError(
-                        "Authentication failed: Invalid credentials"
+                        "Authentication failed: login form detected after login"
                     )
+                raise AuthenticationError(
+                    "Authentication failed: unexpected profile response"
+                )
+            elif profile_response.status_code in (301, 302):
+                raise AuthenticationError("Authentication failed: redirected to login")
+            else:
+                raise AuthenticationError(
+                    f"Authentication failed: HTTP {profile_response.status_code}"
+                )
 
         except requests.RequestException as e:
             raise AuthenticationError(f"Failed to validate authentication: {e}")
@@ -376,18 +589,145 @@ class PESUAttendanceScraper:
         except requests.RequestException as e:
             app_logger.warning(f"Error during logout: {e}")
 
+    def _prepare_profile_context(
+        self, initial_response: Optional[requests.Response] = None
+    ) -> str:
+        """
+        Perform the minimal sequence of requests that prepare the student profile context on the server.
+        If `initial_response` is provided (e.g., the final response after login), it will be reused to
+        extract CSRF and avoid an extra profile GET. Returns the CSRF token to use for subsequent AJAX requests.
+        """
+        profile_url = f"{self.BASE_URL}/s/studentProfilePESU"
+
+        # Reuse provided response to avoid an extra network call
+        if initial_response is not None:
+            r = initial_response
+        else:
+            try:
+                r = self.session.get(profile_url, allow_redirects=True, timeout=15)
+                r.raise_for_status()
+            except requests.exceptions.HTTPError as e:
+                cookies = self.session.cookies.get_dict()
+                if "JSESSIONID" in cookies or "SESSION" in cookies:
+                    app_logger.debug(
+                        "Fetching profile returned error but session cookie present; retrying once"
+                    )
+                    r = self.session.get(profile_url, allow_redirects=True, timeout=15)
+                    r.raise_for_status()
+                else:
+                    raise
+
+        # Prefer HTML token found on the page, then cookie
+        try:
+            html_csrf = self._extract_csrf_token(r.text)
+        except AuthenticationError:
+            html_csrf = None
+
+        cookie_csrf = self.session.cookies.get(
+            "XSRF-TOKEN"
+        ) or self.session.cookies.get("CSRF-TOKEN")
+
+        if html_csrf:
+            csrf_token = html_csrf
+        elif cookie_csrf:
+            csrf_token = cookie_csrf
+        else:
+            raise AuthenticationError(
+                "Missing CSRF token before fetching profile; expected an HTML or cookie-based token."
+            )
+
+        # Prepare headers for AJAX-like requests
+        headers = {
+            "X-Requested-With": "XMLHttpRequest",
+            "X-CSRF-Token": csrf_token,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": profile_url,
+        }
+
+        # Make a single best-effort preparatory request (semesters); avoid the heavier admin endpoint to reduce requests
+        try:
+            r_sem = self.session.get(
+                f"{self.BASE_URL}/a/studentProfilePESU/getStudentSemestersPESU",
+                params={"_": int(time.time() * 1000)},
+                headers=headers,
+                timeout=15,
+            )
+            r_sem.raise_for_status()
+        except Exception:
+            app_logger.debug("Semesters fetch failed; continuing anyway")
+
+        return csrf_token
+
+    def _fetch_semester_batch_ids(self, csrf_token: str) -> Optional[List[str]]:
+        """
+        Fetch semester options and return a list of `value` attributes found in
+        the <option> tags (e.g., batchClassId values). Returns None if nothing
+        can be discovered.
+        """
+        url = f"{self.BASE_URL}/a/studentProfilePESU/getStudentSemestersPESU"
+        headers = {
+            "X-Requested-With": "XMLHttpRequest",
+            "X-CSRF-Token": csrf_token,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": f"{self.BASE_URL}/s/studentProfilePESU",
+        }
+        try:
+            resp = self.session.get(
+                url, params={"_": int(time.time() * 1000)}, headers=headers, timeout=15
+            )
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+            options = soup.find_all("option")
+            values: List[str] = []
+            for opt in options:
+                val = opt.get("value")
+                if val and re.search(r"\d+", val):
+                    values.append(val)
+            return values if values else None
+        except requests.RequestException as e:
+            app_logger.debug(f"Failed to fetch semester batch ids: {e}")
+            return None
+
     def scrape_attendance_data(self) -> Optional[List[List[str]]]:
         app_logger.info(
             f"Starting attendance data scraping for branch: {self.branch_prefix}"
         )
 
         try:
-            # Get fresh CSRF token for attendance requests
-            dashboard_url = f"{self.BASE_URL}/s/studentProfilePESU"
-            dashboard_response = self.session.get(dashboard_url)
-            dashboard_response.raise_for_status()
+            # Ensure the profile context is prepared and get a CSRF token
+            csrf_token = self._prepare_profile_context()
 
-            csrf_token = self._extract_csrf_token(dashboard_response.text)
+            # If batch class IDs are not configured (None/empty), attempt to fetch them
+            if not self.batch_class_ids:
+                fetched = self._fetch_semester_batch_ids(csrf_token)
+                if fetched:
+                    # Record auto-discovery and build suggestion message
+                    self._auto_discovered_batch_ids = fetched
+                    self.batch_class_ids = fetched if len(fetched) > 1 else fetched[0]
+                    try:
+                        prefix = re.sub(r"\d+$", "", self.username)
+                        ids = ",".join(fetched)
+                        msg = (
+                            f"Auto-discovered batchClassId(s) for SRN prefix '{prefix}': {ids}. "
+                            "Consider opening a PR to add this mapping to 'frontend/web/mapping.json' under 'BATCH_CLASS_ID_MAPPING'."
+                        )
+                        self._pr_suggestion = msg
+                        app_logger.info(
+                            f"Auto-discovered batchClassId(s) during scraping: {self.batch_class_ids}"
+                        )
+                        app_logger.info(self._pr_suggestion)
+                    except Exception:
+                        try:
+                            app_logger.info(
+                                f"Auto-discovered batchClassId(s) during scraping: {self.batch_class_ids}"
+                            )
+                        except Exception:
+                            pass
+                else:
+                    app_logger.warning(
+                        "No batchClassId configured and auto-discovery failed; cannot fetch attendance"
+                    )
+                    return None
 
             # Try each batch class ID until we get valid data
             batch_ids = self._normalize_batch_ids(self.batch_class_ids)
@@ -428,10 +768,38 @@ class PESUAttendanceScraper:
             "_csrf": csrf_token,
         }
 
-        try:
-            response = self.session.post(attendance_url, data=request_payload)
+        headers = {
+            "X-Requested-With": "XMLHttpRequest",
+            "X-CSRF-Token": csrf_token,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": f"{self.BASE_URL}/s/studentProfilePESU",
+        }
 
+        try:
+            response = self.session.post(
+                attendance_url, data=request_payload, headers=headers, timeout=15
+            )
+
+            # If we are redirected to sessionExpired or an HTTP 4xx occurs, log cookies & try https fallback
             if response.status_code != 200:
+                app_logger.debug(
+                    f"Attendance POST status={response.status_code} url={response.url}"
+                )
+                cookies = self.session.cookies.get_dict()
+                app_logger.debug(f"Session cookies: {cookies}")
+                # If server redirected to an http URL that returns 404, try https equivalent
+                try:
+                    if getattr(response, "url", "").startswith("http://"):
+                        alt = "https://" + response.url.split("://", 1)[1]
+                        app_logger.debug(f"Retrying attendance URL with https: {alt}")
+                        alt_resp = self.session.post(
+                            alt, data=request_payload, headers=headers, timeout=15
+                        )
+                        if alt_resp.status_code == 200:
+                            return self._parse_attendance_table(alt_resp.text)
+                except Exception:
+                    pass
+
                 app_logger.error(
                     f"HTTP {response.status_code} error for batch ID {batch_id}"
                 )
@@ -472,25 +840,40 @@ class PESUAttendanceScraper:
         return [cell.get_text(strip=True) for cell in table_row.find_all("td")]
 
     def _is_valid_attendance_record(self, row_data: List[str]) -> bool:
-        # Check minimum required columns and exclude invalid entries
-        if len(row_data) < 3:
+        # Require at least a subject code/name; allow NA values in numeric columns
+        if len(row_data) < 2:
             return False
 
-        # Skip records marked as "NA" (not applicable)
-        if len(row_data) > 2 and row_data[2] == "NA":
-            app_logger.debug(f"Skipping invalid attendance entry: {row_data}")
+        # Reject rows with empty subject/course code
+        if not row_data[0] or not row_data[0].strip():
             return False
+
+        # If the numeric column(s) are 'NA' we still consider this a valid record
+        if (
+            len(row_data) > 2
+            and isinstance(row_data[2], str)
+            and row_data[2].strip().upper() == "NA"
+        ):
+            app_logger.debug(
+                f"Attendance entry contains 'NA' but will be included: {row_data}"
+            )
 
         return True
 
 
-def fetch_student_attendance(username: str, password: str) -> Optional[List[List[str]]]:
-    """Convenience function for external usage"""
+def fetch_student_attendance(
+    username: str, password: str
+) -> tuple[Optional[List[List[str]]], PESUAttendanceScraper]:
+    """Convenience function that returns (attendance_data, scraper) for external usage.
+
+    The returned scraper may contain an informational suggestion if batchClassId(s)
+    were auto-discovered during login or scraping.
+    """
     scraper = PESUAttendanceScraper(username, password)
 
     try:
         scraper.login()
-        return scraper.scrape_attendance_data()
+        return scraper.scrape_attendance_data(), scraper
     finally:
         scraper.logout()
 
@@ -511,28 +894,36 @@ async def process_attendance_task(username: str, password: str) -> Dict[str, Any
     try:
         app_logger.info(f"Starting attendance processing for SRN: {username[:10]}")
 
-        # Initialize scraper for subject mapping access
-        scraper = PESUAttendanceScraper(username, password)
-
-        # Fetch attendance data using convenience function
-        attendance_data = fetch_student_attendance(username, password)
+        # Initialize scraper for subject mapping access (for client-friendly labels)
+        # Fetch attendance data using convenience function which also returns the scraper
+        attendance_data, used_scraper = fetch_student_attendance(username, password)
 
         if not attendance_data:
             raise AttendanceScrapingError("No attendance data retrieved")
 
         app_logger.info("Formatting attendance data")
 
-        # Format attendance data for client consumption
+        # Format attendance data for client consumption using the returned scraper's subject mapping
         formatted_attendance = _format_attendance_data(
-            attendance_data, scraper.subject_mapping
+            attendance_data, used_scraper.subject_mapping
         )
 
-        app_logger.info("Attendance processing completed successfully")
-
-        return {
+        result = {
             "status": "complete",
             "attendance": formatted_attendance,
         }
+
+        # If we auto-discovered batchClassIds, add a helpful suggestion to the result
+        if getattr(used_scraper, "_pr_suggestion", None):
+            result["suggestions"] = [used_scraper._pr_suggestion]
+            try:
+                app_logger.info(f"Suggestion for user: {used_scraper._pr_suggestion}")
+            except Exception:
+                pass
+
+        app_logger.info("Attendance processing completed successfully")
+
+        return result
 
     except (AuthenticationError, AttendanceScrapingError) as e:
         # Handle specific scraping errors with detailed logging
@@ -553,14 +944,59 @@ def _format_attendance_data(
     formatted_attendance: List[Dict[str, Any]] = []
 
     for item in attendance_data:
-        # Send raw data to client - let JS handle validation and calculations
-        if len(item) >= 3:  # Basic check for minimum fields
-            formatted_attendance.append(
-                {
-                    "subject": subject_mapping.get(item[0], item[0]),
-                    "raw_data": item[2],
-                }
+        # Require at least subject code/name
+        if len(item) < 1:
+            continue
+
+        subject_code = item[0]
+        course_name = item[1] if len(item) > 1 else None
+        raw_total = item[2] if len(item) > 2 else None
+        raw_percentage = item[3] if len(item) > 3 else None
+
+        # Normalize 'NA' to None and attempt to coerce numeric values
+        def normalize_int(val: Optional[str]) -> Optional[int]:
+            if not val:
+                return None
+            v = val.strip()
+            if v.upper() == "NA":
+                return None
+            m = re.search(r"(\d+)", v)
+            return int(m.group(1)) if m else None
+
+        def normalize_float(val: Optional[str]) -> Optional[float]:
+            if not val:
+                return None
+            v = val.strip().replace("%", "")
+            if v.upper() == "NA":
+                return None
+            try:
+                return float(v)
+            except Exception:
+                m = re.search(r"(\d+(?:\.\d+)?)", v)
+                return float(m.group(1)) if m else None
+
+        total_classes = normalize_int(raw_total)
+        percentage = normalize_float(raw_percentage)
+
+        if (
+            total_classes is None
+            and raw_total
+            and isinstance(raw_total, str)
+            and raw_total.strip().upper() == "NA"
+        ):
+            app_logger.debug(
+                f"Normalized 'NA' total_classes for subject {subject_code}"
             )
+
+        formatted_attendance.append(
+            {
+                "subject": subject_mapping.get(subject_code, subject_code),
+                "course_name": course_name,
+                "total_classes": total_classes,
+                "percentage": percentage,
+                "raw_data": raw_total,
+            }
+        )
 
     return formatted_attendance
 
