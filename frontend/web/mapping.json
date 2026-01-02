@@ -16,9 +16,17 @@
         "UE23CS342AA3": "IoT",
         "UE23CS342AA4": "AC",
         "UE23CS342AA6": "HCI",
+        "UE23CS342BA4": "GenAI",
+        "UE23CS342BA5": "BC",
+        "UE23CS342BA6": "DFIR",
+        "UE23CS342BA7": "DXT",
         "UE23CS343AB2": "BD",
         "UE23CS343AB3": "GTA",
         "UE23CS343AB6": "CNS",
+        "UE23CS343BB2": "TDL",
+        "UE23CS343BB3": "DBT",
+        "UE23CS343BB6": "IS",
+        "UE23CS343BB7": "MARS",
         "UE23CS351A": "DBMS",
         "UE23CS351B": "CC",
         "UE23CS352A": "ML",
@@ -64,6 +72,6 @@
         "UL25CE121A": "Constitution",
         "UL25CE121B": "Constitution",
         "UZ23UZ221A": "CIE L1",
-        "UZ23UZ221B": "CIE"
+        "UZ23UZ221B": "CIE L2"
     }
 }
