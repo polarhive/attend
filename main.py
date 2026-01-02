@@ -6,6 +6,7 @@ Run with environment toggles to choose which components start:
  - ENABLE_BACKEND_API: start API (defaults to true)
  - ENABLE_BACKEND_WEB: mount & serve static frontend (defaults to true)
  - ENABLE_BACKEND_TELEGRAM: launch the telegram bot as a subprocess (defaults to false)
+ - ENABLE_BACKEND_BUNDLE: bundle frontend assets at startup (defaults to false)
 
 Examples:
     # Run API and bot, but do not serve frontend
@@ -140,6 +141,9 @@ class AppSettings:
         )
         self.ENABLE_BACKEND_TELEGRAM = os.getenv(
             "ENABLE_BACKEND_TELEGRAM", "false"
+        ).lower() in ("1", "true", "yes")
+        self.ENABLE_BACKEND_BUNDLE = os.getenv(
+            "ENABLE_BACKEND_BUNDLE", "false"
         ).lower() in ("1", "true", "yes")
 
 
@@ -320,7 +324,7 @@ class PESUAttendanceScraper:
         raise AuthenticationError("CSRF token not found in response")
 
     def login(self) -> None:
-        app_logger.info("Initiating authentication process")
+        app_log("auth.initiate", "Initiating authentication process")
 
         try:
             # GET initial page (login landing) and gather cookies + form
@@ -453,7 +457,7 @@ class PESUAttendanceScraper:
                     "XSRF-TOKEN"
                 ) or self.session.cookies.get("CSRF-TOKEN")
 
-            app_logger.info("Authentication successful")
+            app_log("auth.success", "Authentication successful")
 
             # If batch class IDs are not configured, attempt to auto-discover them
             # from the semesters endpoint used by the profile page.
@@ -468,28 +472,10 @@ class PESUAttendanceScraper:
 
                         # Use a single value when only one option is found, else keep the list
                         self.batch_class_ids = ids if len(ids) > 1 else ids[0]
-
-                        # Build a concise PR suggestion message that includes the
-                        # SRN prefix (username with trailing digits removed) and the
-                        # discovered batchClassId(s).
-                        try:
-                            prefix = re.sub(r"\d+$", "", self.username)
-                            ids_str = ",".join(str(x) for x in ids)
-                            msg = (
-                                f"Auto-discovered batchClassId(s) for SRN prefix '{prefix}': {ids_str}. "
-                                "Consider opening a PR to add this mapping to 'frontend/web/mapping.json'."
-                            )
-                            self._pr_suggestion = msg
-                        except Exception:
-                            self._pr_suggestion = (
-                                f"Auto-discovered batchClassId(s): {ids}. "
-                                "Consider opening a PR to add this mapping to 'frontend/web/mapping.json'."
-                            )
-
-                        app_logger.info(
-                            f"Auto-discovered batchClassId(s): {self.batch_class_ids}"
+                        app_log(
+                            "mapping.auto_discovered",
+                            f"Auto-discovered batchClassId(s): {self.batch_class_ids}",
                         )
-                        app_logger.info(self._pr_suggestion)
                 except Exception as e:
                     app_logger.debug(f"Auto-discovery of batchClassId failed: {e}")
 
@@ -539,7 +525,7 @@ class PESUAttendanceScraper:
         try:
             logout_url = f"{self.BASE_URL}/logout"
             self.session.get(logout_url)
-            app_logger.info("Session terminated successfully")
+            app_log("session.terminated", "Session terminated successfully")
         except requests.RequestException as e:
             app_logger.warning(f"Error during logout: {e}")
 
@@ -660,7 +646,7 @@ class PESUAttendanceScraper:
                 # Perhaps it's JSON
                 try:
                     data = resp.json()
-                    app_logger.info(f"Parsed as JSON: {data}")
+                    app_log("semester.parsed", f"Parsed as JSON: {data}", "debug")
                     if isinstance(data, list):
                         for item in data:
                             val = item.get("value")
@@ -709,10 +695,11 @@ class PESUAttendanceScraper:
                             "Consider opening a PR to add this mapping to 'frontend/web/mapping.json'."
                         )
                         self._pr_suggestion = msg
-                        app_logger.info(
-                            f"Auto-discovered batchClassId(s) during scraping: {self.batch_class_ids}"
+                        app_log(
+                            "mapping.auto_discovered",
+                            f"Auto-discovered batchClassId(s) during scraping: {self.batch_class_ids}",
                         )
-                        app_logger.info(self._pr_suggestion)
+                        app_log("mapping.suggestion", self._pr_suggestion)
                     except Exception:
                         try:
                             app_logger.info(
@@ -815,12 +802,20 @@ class PESUAttendanceScraper:
         attendance_table = soup.find("table", {"class": "table"})
 
         if not attendance_table:
-            app_logger.warning("No attendance table found in response")
+            app_log(
+                "scrape.no_table_found",
+                "No attendance table found in response",
+                "warning",
+            )
             return None
 
         table_body = attendance_table.find("tbody")  # type: ignore
         if not table_body:
-            app_logger.warning("No table body found in attendance table")
+            app_log(
+                "scrape.no_table_body",
+                "No table body found in attendance table",
+                "warning",
+            )
             return None
 
         attendance_records = []
@@ -891,7 +886,9 @@ async def process_attendance_task(
     scraper: Optional[PESUAttendanceScraper] = None
 
     try:
-        app_logger.info(f"Starting attendance processing for SRN: {username[:10]}")
+        app_log(
+            "fetch.start", f"Starting attendance processing for SRN: {username[:10]}"
+        )
 
         # Initialize scraper for subject mapping access (for client-friendly labels)
         # Fetch attendance data using convenience function which also returns the scraper
@@ -902,7 +899,7 @@ async def process_attendance_task(
         if not attendance_data:
             raise AttendanceScrapingError("No attendance data retrieved")
 
-        app_logger.info("Formatting attendance data")
+        app_log("fetch.formatting", "Formatting attendance data")
 
         # Format attendance data for client consumption using the returned scraper's subject mapping
         formatted_attendance = _format_attendance_data(
@@ -954,24 +951,27 @@ Any additional context here."""
                     str(x) for x in used_scraper._auto_discovered_batch_ids
                 ]
             try:
-                app_logger.info(f"Suggestion for user: {used_scraper._pr_suggestion}")
+                app_log(
+                    "mapping.suggestion",
+                    f"Suggestion for user: {used_scraper._pr_suggestion}",
+                )
             except Exception:
                 pass
 
-        app_logger.info("Attendance processing completed successfully")
+        app_log("fetch.complete", "Attendance processing completed successfully")
 
         return result
 
     except (AuthenticationError, AttendanceScrapingError) as e:
         # Handle specific scraping errors with detailed logging
         error_msg = f"Attendance processing error: {str(e)}"
-        app_logger.error(error_msg)
+        app_log("error.attendance_processing", error_msg, "error")
         raise
 
     except Exception as e:
         # Handle unexpected errors with comprehensive logging
         error_msg = f"Unexpected error during processing: {str(e)}"
-        app_logger.error(error_msg)
+        app_log("error.unexpected", error_msg, "error")
         raise
 
 
@@ -1047,6 +1047,19 @@ try:
     mappings = load_mappings_config()
     settings = load_app_settings()
     app_logger = setup_logger()
+
+    # Small helper to emit semantic, machine-parseable log keys along with human-friendly messages
+    def app_log(key: str, message: str | None = None, level: str = "info") -> None:
+        msg = f"[{key}] {message or key}"
+        if level == "debug":
+            app_logger.debug(msg)
+        elif level == "warning":
+            app_logger.warning(msg)
+        elif level == "error":
+            app_logger.error(msg)
+        else:
+            app_logger.info(msg)
+
 except ConfigurationError as e:
     # Re-raise with additional context for easier debugging
     raise ConfigurationError(f"Failed to initialize configuration: {e}") from e
@@ -1095,7 +1108,7 @@ async def get_attendance(request: dict = Body(...)) -> dict:
         )
 
     except ConfigurationError as error:
-        app_logger.error(f"Configuration error: {error}")
+        app_log("error.config", f"Configuration error: {error}", "error")
         response, status_code = APIResponse.error(
             error_type="ConfigurationError",
             details=str(error),
@@ -1105,7 +1118,7 @@ async def get_attendance(request: dict = Body(...)) -> dict:
         raise HTTPException(status_code=status_code, detail=response)
 
     except AuthenticationError as error:
-        app_logger.warning(f"Authentication failed: {error}")
+        app_log("auth.failed", f"Authentication failed: {error}", "warning")
         response, status_code = APIResponse.error(
             error_type="AuthenticationError",
             details=str(error),
@@ -1115,7 +1128,7 @@ async def get_attendance(request: dict = Body(...)) -> dict:
         raise HTTPException(status_code=status_code, detail=response)
 
     except AttendanceScrapingError as error:
-        app_logger.error(f"Scraping error: {error}")
+        app_log("error.scraping", f"Scraping error: {error}", "error")
         response, status_code = APIResponse.error(
             error_type="ScrapingError",
             details=str(error),
@@ -1125,7 +1138,7 @@ async def get_attendance(request: dict = Body(...)) -> dict:
         raise HTTPException(status_code=status_code, detail=response)
 
     except Exception as error:
-        app_logger.error(f"Unexpected error: {error}")
+        app_log("error.unexpected", f"Unexpected error: {error}", "error")
         response, status_code = APIResponse.error(
             error_type="UnexpectedError",
             details=str(error),
@@ -1165,7 +1178,11 @@ async def get_semesters(request: dict = Body(...)) -> dict:
             scraper.logout()
 
     except Exception as e:
-        app_logger.error(f"Error fetching semesters for {username}: {e}")
+        app_log(
+            "semester.fetch_error",
+            f"Error fetching semesters for {username}: {e}",
+            "error",
+        )
         response, status_code = APIResponse.error(
             error_type="SemesterError",
             details=str(e),
@@ -1209,7 +1226,10 @@ async def serve_mapping_json():
 if settings.ENABLE_BACKEND_WEB:
     app.mount("/", StaticFiles(directory="frontend/web", html=True), name="frontend")
 else:
-    app_logger.info("Frontend static files mount disabled (ENABLE_BACKEND_WEB=false)")
+    app_log(
+        "config.frontend_disabled",
+        "Frontend static files mount disabled (ENABLE_BACKEND_WEB=false)",
+    )
 
     # Provide helpful root response when frontend static files are disabled
     @app.get("/", include_in_schema=False)
@@ -1252,9 +1272,34 @@ def bundle_assets():
     repo_root = Path(__file__).resolve().parent
     web_dir = repo_root / "frontend" / "web"
 
+    # Update CACHE_NAME in sw.js with commit hash
+    commit_hash = os.getenv("VERCEL_GIT_COMMIT_SHA")
+    if commit_hash:
+        commit_hash = commit_hash[:7]  # Short hash
+    else:
+        import subprocess
+
+        commit_hash = (
+            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
+            .decode()
+            .strip()
+        )
+    sw_path = web_dir / "sw.js"
+    content = sw_path.read_text()
+    content = re.sub(
+        r"const CACHE_NAME = 'attendance-tracker-' \+ '.*';",
+        f"const CACHE_NAME = 'attendance-tracker-' + '{commit_hash}';",
+        content,
+    )
+    sw_path.write_text(content)
+    app_log(
+        "assets.cache_updated",
+        f"Updated CACHE_NAME in sw.js to attendance-tracker-{commit_hash}",
+    )
+
     # Rebuild JS bundle (exclude legacy analytics file)
     js_files = ["chart.min.js", "script.js"]
-    app_logger.info("Bundling %s", " ".join(js_files))
+    app_log("assets.bundling", f"Bundling {' '.join(js_files)}")
     bundle_path = web_dir / "bundle.min.js"
     if bundle_path.exists():
         bundle_path.unlink()
@@ -1272,7 +1317,9 @@ def bundle_assets():
             bundle += "\n".join(lines) + "\n"
     with open(bundle_path, "w", encoding="utf-8") as f:
         f.write(bundle)
-    app_logger.info("Frontend JS assets bundled successfully: %s", bundle_path)
+    app_log(
+        "assets.bundle_done", f"Frontend JS assets bundled successfully: {bundle_path}"
+    )
 
     # Minify CSS (write style.min.css). Uses rcssmin when available, falls back to a simple stripper.
     css_src = web_dir / "style.css"
@@ -1310,57 +1357,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.bundle:
-        # Get commit hash
-        commit_hash = os.getenv("VERCEL_GIT_COMMIT_SHA")
-        if commit_hash:
-            commit_hash = commit_hash[:7]  # Short hash
-        else:
-            import subprocess
-
-            commit_hash = (
-                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
-                .decode()
-                .strip()
-            )
-        # Update sw.js
-        sw_path = Path(__file__).resolve().parent / "frontend" / "web" / "sw.js"
-        content = sw_path.read_text()
-        content = re.sub(
-            r"const CACHE_NAME = 'attendance-tracker-' \+ '.*';",
-            f"const CACHE_NAME = 'attendance-tracker-' + '{commit_hash}';",
-            content,
-        )
-        sw_path.write_text(content)
-        print(f"Updated CACHE_NAME in sw.js to attendance-tracker-{commit_hash}")
-        # Then bundle
         bundle_assets()
         sys.exit(0)
 
-    # Always update VERSION and bundle at startup
-    commit_hash = os.getenv("VERCEL_GIT_COMMIT_SHA")
-    if commit_hash:
-        commit_hash = commit_hash[:7]  # Short hash
-    else:
-        import subprocess
+    # Bundle at startup if enabled
+    if settings.ENABLE_BACKEND_BUNDLE:
+        bundle_assets()
 
-        commit_hash = (
-            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
-            .decode()
-            .strip()
-        )
-    sw_path = Path(__file__).resolve().parent / "frontend" / "web" / "sw.js"
-    content = sw_path.read_text()
-    content = re.sub(
-        r"const CACHE_NAME = 'attendance-tracker-' \+ '.*';",
-        f"const CACHE_NAME = 'attendance-tracker-' + '{commit_hash}';",
-        content,
-    )
-    sw_path.write_text(content)
-    print(f"Updated CACHE_NAME in sw.js to attendance-tracker-{commit_hash}")
-    bundle_assets()
-
-    # Optionally start the Telegram bot as a separate subprocess.
-    # Set ENABLE_BACKEND_TELEGRAM=1 (or true) in the environment to enable.
+    # Start Telegram bot subprocess if enabled
     bot_proc = None
     try:
         if settings.ENABLE_BACKEND_TELEGRAM:

@@ -10,14 +10,19 @@ async function checkVersion() {
             const currentVersion = match[1];
             const storedVersion = Cookies.get('app_version');
             if (storedVersion !== currentVersion) {
-                // Notify user
-                alert('App updated! Logging out.');
-                // Clear all cookies
-                Cookies.deleteAll();
-                // Set new version
+                // Prefer a non-modal in-page notification instead of alert.
+                const hadCookies = Boolean(Cookies.get('srn') || Cookies.get('password') || Cookies.get('batch_id'));
+                if (hadCookies) {
+                    showNotification('App updated! Logging out.', 'info', 3500);
+                    // Clear all cookies to ensure we start fresh
+                    Cookies.deleteAll();
+                } else {
+                    showNotification('App updated! Refreshing.', 'info', 2500);
+                }
+                logEvent('sw.update_available', {}, 'info');
+                // Remember new version and reload after a short delay so notification is visible
                 Cookies.set('app_version', currentVersion, 365);
-                // Reload
-                window.location.reload();
+                setTimeout(() => window.location.reload(), 600);
             }
         }
     } catch (e) {
@@ -149,14 +154,33 @@ function buildStaticDOM() {
 }
 
 // Build the DOM immediately
-checkVersion();
 buildStaticDOM();
+checkVersion();
 
 // DOM Elements (now available)
 const form = document.getElementById('attendance-form');
 const resultDiv = document.getElementById('result');
 const logoutBtn = document.getElementById('logout-btn');
 const notificationContainer = document.getElementById('notification-container');
+
+// Small helper to show non-modal in-app notifications
+function showNotification(message, type = 'info', timeout = 3000) {
+    try {
+        const notif = document.createElement('div');
+        notif.className = 'notification' + (type === 'error' ? ' notification-error' : '');
+        notif.textContent = message;
+        if (notificationContainer) {
+            notificationContainer.appendChild(notif);
+            setTimeout(() => notif.remove(), timeout);
+        } else {
+            // Fallback to console if notifications area not present
+            console.info(message);
+        }
+    } catch (e) {
+        console.warn('Failed to show notification:', e);
+    }
+}
+
 const srnInput = document.getElementById('srn');
 const submitButton = document.querySelector('#attendance-form button[type="submit"]');
 const submitLabel = submitButton.querySelector('span') || submitButton;
@@ -382,6 +406,44 @@ async function hideOfflineBanner() {
 function setLoadingState(isLoading) {
     document.body.classList.toggle('loading', isLoading);
 }
+
+// Semantic log keys and templates used across frontend and backend.
+// Keep human-readable templates and a stable event key prefix so logs are machine-parseable.
+const LOG_TEMPLATES = {
+    'fetch.in_progress': 'Request already in progress',
+    'network.offline_fetch_blocked': 'You are offline. Cannot fetch new attendance data.',
+    'fetch.start': 'Initiating attendance fetch for ${srn}',
+    'auth.validating': 'Validating credentials...',
+    'academy.connecting': 'Connecting to PESU Academy...',
+    'fetch.server_responded': 'Server responded in ${duration}',
+    'fetch.parsing': 'Parsing attendance data...',
+    'mapping.redirect': 'Redirecting to add mappings...',
+    'fetch.found_subjects': 'Found ${count} subjects',
+    'ui.rendering': 'Rendering attendance visualization...',
+    'mapping.auto_discovered': 'Auto-discovered batch IDs; redirecting to GitHub issue for mapping addition.',
+    'fetch.complete': 'All done! Attendance loaded successfully',
+    'error.generic': 'Error: ${error}',
+    'validation.invalid_srn': 'Invalid SRN format',
+    'semester.auto_selected': 'Semester auto-selected, submit to get attendance',
+    'semester.fetch_error': 'Error fetching semesters: ${error}',
+    'sw.update_available': 'App updated! Refresh to get the latest version.',
+    'sw.registration_failed': 'ServiceWorker registration failed',
+    'network.online': 'Back online! You can fetch new attendance data.',
+    'network.offline': 'You are offline. App will work with cached data.',
+};
+
+function renderLogTemplate(key, params = {}) {
+    const template = LOG_TEMPLATES[key] || key;
+    return template.replace(/\$\{(\w+)\}/g, (m, p1) => params[p1] !== undefined ? params[p1] : '');
+}
+
+// Log event with a stable key and optional params. This produces messages like:
+// "[fetch.start] Initiating attendance fetch for PES2UG23..."
+function logEvent(key, params = {}, type = 'info') {
+    const text = renderLogTemplate(key, params);
+    logMessage(`[${key}] ${text}`, type);
+}
+
 function logMessage(message, type = 'info') {
     if (type === 'error') {
         const notif = document.createElement('div');
@@ -706,8 +768,8 @@ function checkSRNValidity() {
 }
 
 async function fetchAttendance(srn, password, batchId = null) {
-    if (isProcessing) { logMessage("Request already in progress", "error"); return; }
-    if (isOffline) { logMessage("You are offline. Cannot fetch new attendance data.", "error"); return; }
+    if (isProcessing) { logEvent('fetch.in_progress', {}, 'error'); return; }
+    if (isOffline) { logEvent('network.offline_fetch_blocked', {}, 'error'); return; }
     try {
         // Ensure button shows fetch state
         setSubmitState(true, 'Fetching attendance...');
@@ -716,11 +778,10 @@ async function fetchAttendance(srn, password, batchId = null) {
         setLoadingState(true);
         isProcessing = true;
         const loadingLogs = document.getElementById('loading-logs'); if (loadingLogs) { loadingLogs.innerHTML = ''; }
-        if (!validateSRN(srn)) { logMessage("SRN not present in mapping; attempting to auto-discover after authentication", "info"); }
 
-        logMessage(`Initiating attendance fetch for ${srn}`, "info");
-        logMessage("Validating credentials...", "info");
-        logMessage("Connecting to PESU Academy...", "info");
+        logEvent('fetch.start', { srn }, 'info');
+        logEvent('auth.validating', {}, 'info');
+        logEvent('academy.connecting', {}, 'info');
         const requestStartTime = performance.now();
 
         const response = await fetch('/api/attendance', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' }, body: JSON.stringify({ username: srn, password: password, batch_id: batchId }) });
@@ -732,20 +793,20 @@ async function fetchAttendance(srn, password, batchId = null) {
         const requestEndTime = performance.now();
         const requestDuration = requestEndTime - requestStartTime;
         let durationText; if (requestDuration >= 1000) durationText = `${(requestDuration / 1000).toFixed(1)} seconds`; else durationText = `${Math.round(requestDuration)}ms`;
-        logMessage(`✓ Server responded in ${durationText}`, "info");
-        logMessage(`✓ Parsing attendance data...`, "info");
+        logEvent('fetch.server_responded', { duration: durationText }, 'info');
+        logEvent('fetch.parsing', {}, 'info');
 
         // If server returns redirect, redirect instead of showing data
         if (data.data?.redirect) {
-            logMessage('Redirecting to add mappings...', 'info');
+            logEvent('mapping.redirect', {}, 'info');
             window.location = data.data.redirect;
             return;
         }
 
         const attendanceData = { attendance: data.data.attendance || data.data };
-        logMessage(`✓ Found ${attendanceData.attendance.length} subjects`, "info");
+        logEvent('fetch.found_subjects', { count: attendanceData.attendance.length }, 'info');
         Auth.save(srn, password);
-        logMessage(`✓ Rendering attendance visualization...`, "info");
+        logEvent('ui.rendering', {}, 'info');
         displayAttendance(attendanceData);
         updateUIForLoggedInState();
 
@@ -757,14 +818,14 @@ async function fetchAttendance(srn, password, batchId = null) {
             const title = encodeURIComponent(`feat: mappings for ${prefix}`);
             const body = encodeURIComponent(`## Description\nAdd mappings for ${prefix}.\n\n## Args\n- sem: ${prefix}\n- source: auto-discovered\n- target: [${discovered.join(', ')}]\n\n## Notes\nAny additional context here.`);
             const issueUrl = `https://github.com/polarhive/attend/issues/new?title=${title}&body=${body}`;
-            logMessage('Auto-discovered batch IDs; redirecting to GitHub issue for mapping addition.', 'info');
+            logEvent('mapping.auto_discovered', {}, 'info');
             window.open(issueUrl, '_blank');
         }
 
 
-        logMessage(`✓ All done! Attendance loaded successfully`, "info");
+        logEvent('fetch.complete', {}, 'info');
     } catch (error) {
-        logMessage(`Error: ${error.message}`, "error");
+        logEvent('error.generic', { error: error.message }, 'error');
         Auth.clear();
     } finally {
         setLoadingState(false);
@@ -784,7 +845,7 @@ form.addEventListener('submit', async (e) => {
     setSubmitState(true, 'Waiting for response...');
     const srn = srnInput.value.toUpperCase();
     const password = document.getElementById('password').value;
-    if (!validateSRN(srn)) { logMessage("Invalid SRN format", "error"); setSubmitState(false); return; }
+    if (!validateSRN(srn)) { logEvent('validation.invalid_srn', {}, 'error'); setSubmitState(false); return; }
     cleanUrlParameters();
 
     const semesterSelect = document.getElementById('semester');
@@ -821,7 +882,7 @@ form.addEventListener('submit', async (e) => {
             }
             // Show semester group
             document.getElementById('semester-group').style.display = 'block';
-            logMessage("Semester auto-selected, submit to get attendance", "info");
+            logEvent('semester.auto_selected', {}, 'info');
 
             // Change button label to 'Submit' so user knows to submit with selected semester
             try {
@@ -834,7 +895,7 @@ form.addEventListener('submit', async (e) => {
             setSubmitState(false, undefined, { skipRestore: true });
             return;
         } catch (error) {
-            logMessage(`Error fetching semesters: ${error.message}`, "error");
+            logEvent('semester.fetch_error', { error: error.message }, 'error');
             setSubmitState(false);
             return;
         }
@@ -911,12 +972,13 @@ if ('serviceWorker' in navigator) {
                     const newWorker = registration.installing;
                     newWorker.addEventListener('statechange', function () {
                         if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                            logMessage('App updated! Refresh to get the latest version.', 'info');
+                            logEvent('sw.update_available', {}, 'info');
+                            try { showNotification(renderLogTemplate('sw.update_available'), 'info', 5000); } catch (e) { /* ignore */ }
                         }
                     });
                 });
             })
-            .catch(function (err) { logMessage('ServiceWorker registration failed', 'error'); });
+            .catch(function (err) { logEvent('sw.registration_failed', {}, 'error'); });
     });
 }
 
@@ -924,13 +986,13 @@ window.addEventListener('online', function () {
     isOffline = false;
     hideOfflineBanner();
     offlineIndicator.style.display = 'none';
-    logMessage('Back online! You can fetch new attendance data.', 'info');
+    logEvent('network.online', {}, 'info');
 });
 
 window.addEventListener('offline', function () {
     isOffline = true;
     showOfflineBanner().catch(() => { });
-    logMessage('You are offline. App will work with cached data.', 'info');
+    logEvent('network.offline', {}, 'info');
 });
 
 if (!navigator.onLine) { isOffline = true; showOfflineBanner().catch(() => { offlineIndicator.style.display = 'block'; }); }

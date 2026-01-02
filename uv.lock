@@ -187,7 +187,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.4" },
     { name = "rjsmin", specifier = ">=1.2.5" },
     { name = "telebot", specifier = ">=0.0.5" },
-    { name = "uvicorn", specifier = ">=0.35.0" },
+    { name = "uvicorn", specifier = ">=0.40.0" },
 ]
 
 [[package]]
