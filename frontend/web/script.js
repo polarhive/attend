@@ -296,7 +296,6 @@ loadingContainer.innerHTML = `
             <div class="skeleton-bar"></div>
         </div>
     </div>
-    <div class="loading-logs" id="loading-logs"></div>
 `;
 // Loader will be inserted into the DOM when needed (see ensureLoaderInserted)
 
@@ -477,14 +476,7 @@ function logMessage(message, type = 'info') {
     logsContainer.appendChild(logEntry);
     logsSummary.textContent = `Show Logs (${logsContainer.childElementCount})`;
 
-    const loadingLogs = document.getElementById('loading-logs');
-    if (loadingLogs && document.body.classList.contains('loading')) {
-        const loadingLogEntry = document.createElement('div');
-        loadingLogEntry.className = 'loading-log-entry';
-        loadingLogEntry.innerHTML = `<span style="color: var(--text-tertiary); margin-right: 0.5rem;">[${timestamp}]</span><span style="color: ${type === 'error' ? 'var(--danger)' : 'var(--text-secondary)'}">${message}</span>`;
-        loadingLogs.appendChild(loadingLogEntry);
-        loadingLogs.scrollTop = loadingLogs.scrollHeight;
-    }
+
 }
 
 function clearLogs() {
@@ -777,7 +769,6 @@ async function fetchAttendance(srn, password, batchId = null) {
         clearLogs();
         setLoadingState(true);
         isProcessing = true;
-        const loadingLogs = document.getElementById('loading-logs'); if (loadingLogs) { loadingLogs.innerHTML = ''; }
 
         logEvent('fetch.start', { srn }, 'info');
         logEvent('auth.validating', {}, 'info');
