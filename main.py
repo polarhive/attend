@@ -88,7 +88,6 @@ class MappingsData:
     controller_mode: int
     action_type: int
     menu_id: int
-    batchClassId: Optional[Union[int, List[int]]]
     subject_mapping: Dict[str, str]
 
 
@@ -105,7 +104,6 @@ class MappingsConfig:
             controller_mode=self.CONTROLLER_MODE,
             action_type=self.ACTION_TYPE,
             menu_id=self.MENU_ID,
-            batchClassId=None,
             subject_mapping=self.SUBJECT_MAPPING,
         )
 
@@ -265,17 +263,15 @@ class PESUAttendanceScraper:
             self.controller_mode = branch_config.controller_mode
             self.action_type = branch_config.action_type
             self.menu_id = branch_config.menu_id
-            self.batch_class_ids = branch_config.batchClassId
             self.subject_mapping = branch_config.subject_mapping
 
+            self.batch_class_ids = None
             # If a specific batch_id is provided, use it instead
             if batch_id is not None:
                 self.batch_class_ids = [batch_id]
 
-            # Track whether batchClassId(s) were auto-discovered at runtime and
-            # an optional suggestion message to ask the user to open a PR.
+            # Track whether batchClassId(s) were auto-discovered at runtime.
             self._auto_discovered_batch_ids: Optional[List[int]] = None
-            self._pr_suggestion: Optional[str] = None
             self.sem_texts: Optional[Dict[int, str]] = None
 
             # Extract branch prefix from username for logging
@@ -690,16 +686,10 @@ class PESUAttendanceScraper:
                     try:
                         prefix = re.sub(r"\d+$", "", self.username)
                         ids_str = ",".join(str(x) for x in ids)
-                        msg = (
-                            f"Auto-discovered batchClassId(s) for SRN prefix '{prefix}': {ids_str}. "
-                            "Consider opening a PR to add this mapping to 'frontend/web/mapping.json'."
-                        )
-                        self._pr_suggestion = msg
                         app_log(
                             "mapping.auto_discovered",
                             f"Auto-discovered batchClassId(s) during scraping: {self.batch_class_ids}",
                         )
-                        app_log("mapping.suggestion", self._pr_suggestion)
                     except Exception:
                         try:
                             app_logger.info(
@@ -906,57 +896,17 @@ async def process_attendance_task(
             attendance_data, used_scraper.subject_mapping
         )
 
-        # If we auto-discovered batchClassIds, redirect to issue instead of showing data
-        if getattr(used_scraper, "_pr_suggestion", None) and getattr(
-            used_scraper, "_auto_discovered_batch_ids", None
-        ):
-            prefix = re.sub(r"\d+$", "", username)
-            discovered = used_scraper._auto_discovered_batch_ids
-            title = f"feat: adding (sem)/{prefix}"
-            sem_texts = getattr(used_scraper, "sem_texts", {}) or {}
-            target_list = [
-                f"{id} ({sem_texts.get(id, 'Unknown')})" for id in discovered
-            ]
-            body = f"""## Description
-Add mappings for {prefix}.
-
-## Args
-- srn: {username}
-- sem: {prefix}
-- source: auto-discovered
-- target: [{', '.join(target_list)}]
-
-## Suggested Mapping
-```json
-"{prefix}": [{', '.join(str(x) for x in discovered)}]
-```
-
-## Notes
-Any additional context here."""
-            issue_url = f"https://github.com/polarhive/attend/issues/new?{urlencode({'title': title, 'body': body})}"
-            return {"redirect": issue_url}
-
         result = {
             "status": "complete",
             "attendance": formatted_attendance,
         }
 
-        # If we auto-discovered batchClassIds, add a helpful suggestion to the result
-        if getattr(used_scraper, "_pr_suggestion", None):
-            result["suggestions"] = [used_scraper._pr_suggestion]
-            # Also include the structured list of discovered batch IDs so the frontend
-            # can present them interactively to the user (choose/default leftmost)
-            if getattr(used_scraper, "_auto_discovered_batch_ids", None):
-                result["discovered_batch_ids"] = [
-                    str(x) for x in used_scraper._auto_discovered_batch_ids
-                ]
-            try:
-                app_log(
-                    "mapping.suggestion",
-                    f"Suggestion for user: {used_scraper._pr_suggestion}",
-                )
-            except Exception:
-                pass
+        # If we auto-discovered batchClassIds, include the structured list so the frontend
+        # can present them interactively to the user (choose/default leftmost)
+        if getattr(used_scraper, "_auto_discovered_batch_ids", None):
+            result["discovered_batch_ids"] = [
+                str(x) for x in used_scraper._auto_discovered_batch_ids
+            ]
 
         app_log("fetch.complete", "Attendance processing completed successfully")
 
@@ -1296,9 +1246,8 @@ def bundle_assets():
         "assets.cache_updated",
         f"Updated CACHE_NAME in sw.js to attendance-tracker-{commit_hash}",
     )
-
-    # Rebuild JS bundle (exclude legacy analytics file)
-    js_files = ["chart.min.js", "script.js"]
+    # JS bundle
+    js_files = ["chart.min.js", "i.js", "script.js"]
     app_log("assets.bundling", f"Bundling {' '.join(js_files)}")
     bundle_path = web_dir / "bundle.min.js"
     if bundle_path.exists():
@@ -1315,11 +1264,27 @@ def bundle_assets():
                 if not line.strip().startswith("//# sourceMappingURL")
             ]
             bundle += "\n".join(lines) + "\n"
-    with open(bundle_path, "w", encoding="utf-8") as f:
-        f.write(bundle)
-    app_log(
-        "assets.bundle_done", f"Frontend JS assets bundled successfully: {bundle_path}"
-    )
+    try:
+        try:
+            import rjsmin
+
+            minified = rjsmin.jsmin(bundle)
+            with open(bundle_path, "w", encoding="utf-8") as f:
+                f.write(minified)
+            app_log(
+                "assets.bundle_done",
+                f"Frontend JS assets bundled successfully (minified): {bundle_path}",
+            )
+        except Exception:
+            # Fall back to writing the unminified bundle if rjsmin is unavailable
+            with open(bundle_path, "w", encoding="utf-8") as f:
+                f.write(bundle)
+            app_log(
+                "assets.bundle_done",
+                f"Frontend JS assets bundled successfully (unminified): {bundle_path}",
+            )
+    except Exception as e:
+        app_log("assets.bundle_failed", f"Failed to write bundle: {e}", "error")
 
     # Minify CSS (write style.min.css). Uses rcssmin when available, falls back to a simple stripper.
     css_src = web_dir / "style.css"
@@ -1345,7 +1310,8 @@ def bundle_assets():
         app_logger.warning("CSS source file not found at: %s", css_src)
 
 
-if __name__ == "__main__":
+def run(argv: list | None = None) -> None:
+    """Run the application. This is also used as the package console entrypoint (scripts: attend)."""
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -1354,7 +1320,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Update CACHE_NAME in sw.js with commit hash and bundle assets",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.bundle:
         bundle_assets()
@@ -1442,3 +1408,7 @@ if __name__ == "__main__":
                     bot_proc.kill()
                 except Exception:
                     pass
+
+
+if __name__ == "__main__":
+    run()

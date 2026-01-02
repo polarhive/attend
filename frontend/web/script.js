@@ -1,13 +1,50 @@
 // This script builds the DOM structure and contains the main application logic for the Attend web app.
 
+// Constants for icons and templates
+const GITHUB_ICON_SVG = `<svg viewBox="0 0 24 24" fill="white"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>`;
+
+const LOGOUT_ICON_SVG = `<svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>`;
+
+const FORM_HTML = `
+    <div class="form-header"><h2>Sign In</h2></div>
+    <div class="form-group">
+        <label for="srn">SRN</label>
+        <input type="text" id="srn" name="srn" required placeholder="PES2UG23CS123" autocomplete="username" />
+    </div>
+    <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required placeholder="••••••••" autocomplete="current-password" />
+    </div>
+    <div class="form-group" id="semester-group" style="display: none;">
+        <label for="semester">Semester</label>
+        <div class="select-wrap">
+            <select id="semester" name="semester">
+                <option value="">Select Semester (optional)</option>
+            </select>
+        </div>
+    </div>
+    <button type="submit" class="btn-primary"><span>Get Attendance</span></button>
+`;
+
+const THRESHOLD_HTML = `
+    <label for="threshold-slider">
+        <span class="threshold-label">Min:</span>
+        <span id="threshold-display" class="threshold-value">75%</span>
+    </label>
+    <input type="range" id="threshold-slider" min="50" max="100" value="75" step="1">
+`;
+
+const SKELETON_HTML = `<div class="skeleton skeleton-chart"></div><div class="skeleton skeleton-table"></div>`;
+
 // Version check for cache busting
 async function checkVersion() {
     try {
-        const response = await fetch(`/sw.js?v=${Date.now()}`, { cache: 'no-cache' });
+        const response = await fetch(`/sw.js`, { cache: 'no-cache' });
         const text = await response.text();
         const match = text.match(/const CACHE_NAME = 'attendance-tracker-' \+ '([^']+)';/);
         if (match) {
             const currentVersion = match[1];
+            logEvent('version.info', { version: currentVersion });
             const storedVersion = Cookies.get('app_version');
             if (storedVersion !== currentVersion) {
                 // Prefer a non-modal in-page notification instead of alert.
@@ -31,15 +68,24 @@ async function checkVersion() {
 }
 
 function buildStaticDOM() {
-    // Background gradients
+    buildBackground();
+    buildNavbar();
+    buildNotificationContainer();
+    buildMainContent();
+}
+
+function buildBackground() {
+    const fragment = document.createDocumentFragment();
     const bg1 = document.createElement('div');
     bg1.className = 'bg-gradient';
     const bg2 = document.createElement('div');
     bg2.className = 'bg-gradient-2';
-    document.body.appendChild(bg1);
-    document.body.appendChild(bg2);
+    fragment.appendChild(bg1);
+    fragment.appendChild(bg2);
+    document.body.appendChild(fragment);
+}
 
-    // Navbar
+function buildNavbar() {
     const nav = document.createElement('nav');
     nav.className = 'navbar';
 
@@ -52,33 +98,9 @@ function buildStaticDOM() {
     const controls = document.createElement('div');
     controls.className = 'navbar-controls';
 
-    const githubLink = document.createElement('a');
-    githubLink.id = 'github-link';
-    githubLink.href = 'https://github.com/polarhive/attend';
-    githubLink.target = '_blank';
-    githubLink.rel = 'noopener noreferrer';
-    githubLink.className = 'icon-btn';
-    githubLink.style.display = 'inline-flex';
-    githubLink.setAttribute('aria-label', 'GitHub');
-    githubLink.innerHTML = `<svg viewBox="0 0 24 24" fill="white"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>`;
-
-    const navbarThreshold = document.createElement('div');
-    navbarThreshold.id = 'navbar-threshold';
-    navbarThreshold.className = 'threshold-control';
-    navbarThreshold.style.display = 'none';
-    navbarThreshold.innerHTML = `
-        <label for="threshold-slider">
-            <span class="threshold-label">Min:</span>
-            <span id="threshold-display" class="threshold-value">75%</span>
-        </label>
-        <input type="range" id="threshold-slider" min="50" max="100" value="75" step="1">
-    `;
-
-    const logoutBtn = document.createElement('button');
-    logoutBtn.id = 'logout-btn';
-    logoutBtn.className = 'btn-secondary';
-    logoutBtn.style.display = 'none';
-    logoutBtn.innerHTML = `<svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>`;
+    const githubLink = createGitHubLink();
+    const navbarThreshold = createNavbarThreshold();
+    const logoutBtn = createLogoutButton();
 
     controls.appendChild(githubLink);
     controls.appendChild(navbarThreshold);
@@ -87,24 +109,74 @@ function buildStaticDOM() {
     nav.appendChild(titleWrap);
     nav.appendChild(controls);
     document.body.appendChild(nav);
+}
 
-    // Notification container
+function createGitHubLink() {
+    const githubLink = document.createElement('a');
+    githubLink.id = 'github-link';
+    githubLink.href = 'https://github.com/polarhive/attend';
+    githubLink.target = '_blank';
+    githubLink.rel = 'noopener noreferrer';
+    githubLink.className = 'icon-btn';
+    githubLink.style.display = 'inline-flex';
+    githubLink.setAttribute('aria-label', 'GitHub');
+    githubLink.innerHTML = GITHUB_ICON_SVG;
+    return githubLink;
+}
+
+function createNavbarThreshold() {
+    const navbarThreshold = document.createElement('div');
+    navbarThreshold.id = 'navbar-threshold';
+    navbarThreshold.className = 'threshold-control';
+    navbarThreshold.style.display = 'none';
+    navbarThreshold.innerHTML = THRESHOLD_HTML;
+    return navbarThreshold;
+}
+
+function createLogoutButton() {
+    const logoutBtn = document.createElement('button');
+    logoutBtn.id = 'logout-btn';
+    logoutBtn.className = 'btn-secondary';
+    logoutBtn.style.display = 'none';
+    logoutBtn.innerHTML = LOGOUT_ICON_SVG;
+    return logoutBtn;
+}
+
+function buildNotificationContainer() {
     const notif = document.createElement('div');
     notif.id = 'notification-container';
     document.body.appendChild(notif);
+}
 
-    // Main content container
+function buildMainContent() {
     const main = document.createElement('main');
     main.className = 'container';
 
-    // How-it-works info box
+    const fragment = document.createDocumentFragment();
+    const how = createHowItWorksBox();
+    const formWrapper = createFormWrapper();
+    const skeleton = createSkeletonLoader();
+    const result = createResultContainer();
+
+    fragment.appendChild(how);
+    fragment.appendChild(formWrapper);
+    fragment.appendChild(skeleton);
+    fragment.appendChild(result);
+
+    main.appendChild(fragment);
+    document.body.appendChild(main);
+}
+
+function createHowItWorksBox() {
     const how = document.createElement('div');
     how.id = 'how-it-works';
     how.className = 'info-box';
     how.setAttribute('role', 'region');
     how.innerHTML = `<div class="info-bar-text"><span>Credentials stored locally on your browser. No SRN or personal data logged. Checkout the code on GitHub.</span></div>`;
+    return how;
+}
 
-    // Form wrapper and form (IDs used by app logic)
+function createFormWrapper() {
     const formWrapper = document.createElement('div');
     formWrapper.className = 'form-wrapper';
 
@@ -112,45 +184,25 @@ function buildStaticDOM() {
     form.id = 'attendance-form';
     form.className = 'glass-card';
 
-    form.innerHTML = `
-        <div class="form-header"><h2>Sign In</h2></div>
-        <div class="form-group">
-            <label for="srn">SRN</label>
-            <input type="text" id="srn" name="srn" required placeholder="PES2UG23CS123" autocomplete="username" />
-        </div>
-        <div class="form-group">
-            <label for="password">Password</label>
-            <input type="password" id="password" name="password" required placeholder="••••••••" autocomplete="current-password" />
-        </div>
-        <div class="form-group" id="semester-group" style="display: none;">
-            <label for="semester">Semester</label>
-            <div class="select-wrap">
-                <select id="semester" name="semester">
-                    <option value="">Select Semester (optional)</option>
-                </select>
-            </div>
-        </div>
-        <button type="submit" class="btn-primary"><span>Get Attendance</span></button>
-    `;
+    form.innerHTML = FORM_HTML;
 
     formWrapper.appendChild(form);
-    main.appendChild(how);
-    main.appendChild(formWrapper);
+    return formWrapper;
+}
 
-    // Skeleton loader
+function createSkeletonLoader() {
     const skeleton = document.createElement('div');
     skeleton.id = 'skeleton-loader';
     skeleton.style.display = 'none';
-    skeleton.innerHTML = `<div class="skeleton skeleton-chart"></div><div class="skeleton skeleton-table"></div>`;
-    main.appendChild(skeleton);
+    skeleton.innerHTML = SKELETON_HTML;
+    return skeleton;
+}
 
-    // Result container
+function createResultContainer() {
     const result = document.createElement('div');
     result.className = 'result';
     result.id = 'result';
-    main.appendChild(result);
-
-    document.body.appendChild(main);
+    return result;
 }
 
 // Build the DOM immediately
@@ -416,10 +468,9 @@ const LOG_TEMPLATES = {
     'academy.connecting': 'Connecting to PESU Academy...',
     'fetch.server_responded': 'Server responded in ${duration}',
     'fetch.parsing': 'Parsing attendance data...',
-    'mapping.redirect': 'Redirecting to add mappings...',
     'fetch.found_subjects': 'Found ${count} subjects',
     'ui.rendering': 'Rendering attendance visualization...',
-    'mapping.auto_discovered': 'Auto-discovered batch IDs; redirecting to GitHub issue for mapping addition.',
+    'mapping.auto_discovered': 'Auto-discovered batch IDs',
     'fetch.complete': 'All done! Attendance loaded successfully',
     'error.generic': 'Error: ${error}',
     'validation.invalid_srn': 'Invalid SRN format',
@@ -429,6 +480,7 @@ const LOG_TEMPLATES = {
     'sw.registration_failed': 'ServiceWorker registration failed',
     'network.online': 'Back online! You can fetch new attendance data.',
     'network.offline': 'You are offline. App will work with cached data.',
+    'version.info': 'Version: https://github.com/polarhive/attend/commit/${version}',
 };
 
 function renderLogTemplate(key, params = {}) {
@@ -468,15 +520,73 @@ function logMessage(message, type = 'info') {
     timeSpan.textContent = `[${timestamp}]`;
 
     const messageSpan = document.createElement('span');
-    messageSpan.style.color = (type === 'error') ? 'var(--danger)' : 'var(--text-secondary)';
-    messageSpan.textContent = message;
+    // Remove embedded timestamps like [11:29:46] if present so we don't confuse the key extraction
+    let msgNoTimestamp = message.replace(/^\[\d{1,2}:\d{2}:\d{2}\]\s*/, '');
+
+    // Find all bracketed tokens, prefer one that looks like a key (contains a dot)
+    const bracketTokens = msgNoTimestamp.match(/\[([^\]]+)\]/g) || [];
+    let key = '';
+    if (bracketTokens.length > 0) {
+        // Normalize tokens (strip brackets)
+        const stripped = bracketTokens.map(t => t.slice(1, -1));
+        // Prefer token containing a dot like 'fetch.start'
+        key = stripped.find(t => t.includes('.')) || stripped[0] || '';
+        // Remove the chosen token from the message so we don't duplicate it
+        msgNoTimestamp = msgNoTimestamp.replace(new RegExp('^\\s*\\[' + key.replace(/[-\\/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\]\\s*'), '');
+    }
+
+    // Fallback: if no bracket tokens, try to capture a key-like word at the start
+    if (!key) {
+        const maybe = msgNoTimestamp.match(/^([^\s:;,-]+)\b/);
+        if (maybe && maybe[1].includes('.')) key = maybe[1];
+    }
+
+    messageSpan.style.color = getLogColor(key, type);
+    // Make URLs clickable
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    let linkColor = 'var(--primary)';
+    if (key === 'version.info') {
+        messageSpan.style.color = 'white';
+        linkColor = 'var(--success)';
+    } else if (['fetch.start', 'fetch.server_responded', 'fetch.found_subjects', 'fetch.complete'].includes(key)) {
+        messageSpan.style.color = 'white';
+        if (key === 'fetch.start') {
+            msgNoTimestamp = msgNoTimestamp.replace(/for (\S+)/, 'for <span style="color: var(--success);">$1</span>');
+        } else if (key === 'fetch.found_subjects') {
+            msgNoTimestamp = msgNoTimestamp.replace(/(\d+) subjects/, '<span style="color: var(--success);">$1</span> subjects');
+        } else if (key === 'fetch.server_responded') {
+            msgNoTimestamp = msgNoTimestamp.replace(/in ([0-9.]+) seconds/, 'in <span style="color: var(--success);">$1</span> seconds');
+        }
+    }
+    const clickableMsg = msgNoTimestamp.replace(urlRegex, (match) => {
+        const commitMatch = match.match(/\/commit\/([a-f0-9]{7,})/);
+        const linkText = commitMatch ? commitMatch[1] : match;
+        return `<a href="${match}" target="_blank" rel="noopener noreferrer" style="color: ${linkColor}; text-decoration: underline;">${linkText}</a>`;
+    });
+    messageSpan.innerHTML = clickableMsg;
 
     logEntry.appendChild(timeSpan);
     logEntry.appendChild(messageSpan);
     logsContainer.appendChild(logEntry);
     logsSummary.textContent = `Show Logs (${logsContainer.childElementCount})`;
+}
 
-
+function getLogColor(key, type) {
+    if (type === 'error') return 'var(--danger)';
+    const prefix = key.split('.')[0];
+    switch (prefix) {
+        case 'fetch': return 'var(--primary)';
+        case 'network': return 'var(--warning)';
+        case 'auth': return 'var(--success)';
+        case 'academy': return 'var(--purple)';
+        case 'ui': return 'var(--info)';
+        case 'mapping': return 'var(--amber)';
+        case 'semester': return 'var(--emerald)';
+        case 'sw': return 'var(--indigo)';
+        case 'validation': return 'var(--danger)';
+        case 'version': return 'var(--primary)';
+        default: return 'var(--text-secondary)';
+    }
 }
 
 function clearLogs() {
@@ -576,26 +686,31 @@ function parseAttendanceData(rawData) {
         const attendanceParts = item.raw_data.split("/");
         if (attendanceParts.length !== 2) {
             console.warn(`Invalid attendance format: ${item.raw_data}`);
-            return { subject: item.subject, attended: 0, total: 0, skipped: 0, percentage: 0, skippable: 0, threshold: threshold };
+            return {
+                subject: item.subject,
+                attended: 0,
+                total: 0,
+                skipped: 0,
+                percentage: 0,
+                skippable: 0,
+                threshold: threshold
+            };
         }
         const attended = parseInt(attendanceParts[0]);
         const total = parseInt(attendanceParts[1]);
         const skipped = total - attended;
         const percentage = total > 0 ? Math.round((attended / total) * 100 * 100) / 100 : 0;
-        let skippable;
-        if (total === 0) {
-            skippable = 0;
-        } else {
-            const currentPercentage = (attended / total) * 100;
-            if (currentPercentage >= threshold) {
-                skippable = Math.floor((attended * 100 / threshold) - total);
-            } else {
-                const needed = Math.ceil((threshold * total - 100 * attended) / (100 - threshold));
-                skippable = -needed;
-            }
-        }
+        const skippable = calculateSkippable(attended, total, threshold);
 
-        return { subject: item.subject, attended: attended, total: total, skipped: skipped, percentage: percentage, skippable: skippable, threshold: threshold };
+        return {
+            subject: item.subject,
+            attended,
+            total,
+            skipped,
+            percentage,
+            skippable,
+            threshold
+        };
     });
 
     return { ...rawData, attendance: parsedAttendance };
@@ -626,76 +741,147 @@ function recalculateRow(index) {
     const attendedInput = document.querySelector(`input[data-type="attended"][data-index="${index}"]`);
     const totalInput = document.querySelector(`input[data-type="total"][data-index="${index}"]`);
     if (!attendedInput || !totalInput) return;
+
     let attended = parseInt(attendedInput.value) || 0;
     let total = parseInt(totalInput.value) || 0;
-    if (attended > total && total > 0) { attended = total; attendedInput.value = attended; }
-    if (currentAttendanceData && currentAttendanceData[index]) { currentAttendanceData[index].attended = attended; currentAttendanceData[index].total = total; }
+
+    if (attended > total && total > 0) {
+        attended = total;
+        attendedInput.value = attended;
+    }
+
+    if (currentAttendanceData && currentAttendanceData[index]) {
+        currentAttendanceData[index].attended = attended;
+        currentAttendanceData[index].total = total;
+    }
+
     const percentage = total > 0 ? Math.round((attended / total) * 100 * 100) / 100 : 0;
     const threshold = ThresholdManager.getThreshold();
-    let skippable;
-    if (total === 0) { skippable = 0; } else { const currentPercentage = (attended / total) * 100; if (currentPercentage >= threshold) { skippable = Math.floor((attended * 100 / threshold) - total); } else { const needed = Math.ceil((threshold * total - 100 * attended) / (100 - threshold)); skippable = -needed; } }
+    const skippable = calculateSkippable(attended, total, threshold);
+
+    updateRowDisplay(index, percentage, skippable);
+    if (currentAttendanceData) {
+        generateAttendanceChart(currentAttendanceData, threshold);
+    }
+}
+
+function calculateSkippable(attended, total, threshold) {
+    if (total === 0) return 0;
+    const currentPercentage = (attended / total) * 100;
+    if (currentPercentage >= threshold) {
+        return Math.floor((attended * 100 / threshold) - total);
+    } else {
+        const needed = Math.ceil((threshold * total - 100 * attended) / (100 - threshold));
+        return -needed;
+    }
+}
+
+function updateRowDisplay(index, percentage, skippable) {
     const row = document.querySelector(`tr[data-row-index="${index}"]`);
     if (!row) return;
+
     const percentageCell = row.querySelector('.percentage-cell');
     const skippableCell = row.querySelector('.skippable-cell');
-    if (percentageCell) { percentageCell.textContent = `${percentage}%`; }
-    if (skippableCell) {
-        let skippableHtml;
-        if (skippable > 0) skippableHtml = `<span class="skippable-skip">✔ Skip ${skippable}</span>`;
-        else if (skippable < 0) { const need = Math.abs(skippable); skippableHtml = `<span class="skippable-need">✘ Need ${need}</span>`; }
-        else skippableHtml = '0';
-        skippableCell.innerHTML = skippableHtml;
+
+    if (percentageCell) {
+        percentageCell.textContent = `${percentage}%`;
     }
-    if (currentAttendanceData) { generateAttendanceChart(currentAttendanceData, threshold); }
+    if (skippableCell) {
+        skippableCell.innerHTML = getSkippableHtml(skippable);
+    }
 }
 
 function displayAttendance(data) {
-    if (!data || !data.attendance || data.attendance.length === 0) { resultDiv.innerHTML = "<p>No attendance data available.</p>"; return; }
+    if (!data || !data.attendance || data.attendance.length === 0) {
+        resultDiv.innerHTML = "<p>No attendance data available.</p>";
+        return;
+    }
     const parsedData = parseAttendanceData(data);
     currentAttendanceData = parsedData.attendance;
     const initialThreshold = ThresholdManager.getThreshold();
+    showThresholdControls(initialThreshold);
+
+    const chartHtml = '<div class="chart-container"><canvas id="attendanceChart" width="400" height="200"></canvas></div>';
+    const tableHtml = generateAttendanceTableHtml(parsedData.attendance);
+    resultDiv.innerHTML = chartHtml + tableHtml;
+
+    attachInputControlListeners();
+    generateAttendanceChart(parsedData.attendance);
+}
+
+function showThresholdControls(threshold) {
     const navbarThreshold = document.getElementById('navbar-threshold');
     const thresholdSlider = document.getElementById('threshold-slider');
     const thresholdDisplay = document.getElementById('threshold-display');
-    if (navbarThreshold && thresholdSlider && thresholdDisplay) { navbarThreshold.style.display = 'block'; thresholdSlider.value = initialThreshold; thresholdDisplay.textContent = `${initialThreshold}%`; }
+    if (navbarThreshold && thresholdSlider && thresholdDisplay) {
+        navbarThreshold.style.display = 'block';
+        thresholdSlider.value = threshold;
+        thresholdDisplay.textContent = `${threshold}%`;
+    }
+}
 
+function generateAttendanceTableHtml(attendanceData) {
     let html = `
-        <div class="chart-container"><canvas id="attendanceChart" width="400" height="200"></canvas></div>
-        <div class="table-container"><table id="attendance-table"><thead><tr><th>Subject</th><th>Attended</th><th>Total</th><th>Percent</th><th>Buffer</th></tr></thead><tbody>`;
+        <div class="table-container">
+            <table id="attendance-table">
+                <thead>
+                    <tr>
+                        <th>Subject</th>
+                        <th>Attended</th>
+                        <th>Total</th>
+                        <th>Percent</th>
+                        <th>Buffer</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
 
-    parsedData.attendance.forEach((item, index) => {
-        let skippableHtml;
-        if (item.skippable > 0) skippableHtml = `<span class="skippable-skip">✔ Skip ${item.skippable}</span>`;
-        else if (item.skippable < 0) { const need = Math.abs(item.skippable); skippableHtml = `<span class="skippable-need">✘ Need ${need}</span>`; }
-        else skippableHtml = '0';
-
-        html += `
-            <tr data-row-index="${index}">
-                <td>${item.subject}</td>
-                <td>
-                    <div class="input-control">
-                        <button class="control-btn decrement" data-type="attended" data-index="${index}" aria-label="Decrease attended count for ${item.subject}">−</button>
-                        <input type="number" class="attendance-input" data-type="attended" data-index="${index}" value="${item.attended}" min="0" aria-label="Attended classes for ${item.subject}">
-                        <button class="control-btn increment" data-type="attended" data-index="${index}" aria-label="Increase attended count for ${item.subject}">+</button>
-                    </div>
-                </td>
-                <td>
-                    <div class="input-control">
-                        <button class="control-btn decrement" data-type="total" data-index="${index}" aria-label="Decrease total count for ${item.subject}">−</button>
-                        <input type="number" class="attendance-input" data-type="total" data-index="${index}" value="${item.total}" min="0" aria-label="Total classes for ${item.subject}">
-                        <button class="control-btn increment" data-type="total" data-index="${index}" aria-label="Increase total count for ${item.subject}">+</button>
-                    </div>
-                </td>
-                <td class="percentage-cell">${item.percentage}%</td>
-                <td class="skippable-cell">${skippableHtml}</td>
-            </tr>
-        `;
+    attendanceData.forEach((item, index) => {
+        html += generateTableRowHtml(item, index);
     });
 
-    html += `</tbody></table></div>`;
-    resultDiv.innerHTML = html;
-    attachInputControlListeners();
-    generateAttendanceChart(parsedData.attendance);
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+    return html;
+}
+
+function generateTableRowHtml(item, index) {
+    const skippableHtml = getSkippableHtml(item.skippable);
+    return `
+        <tr data-row-index="${index}">
+            <td>${item.subject}</td>
+            <td>
+                <div class="input-control">
+                    <button class="control-btn decrement" data-type="attended" data-index="${index}" aria-label="Decrease attended count for ${item.subject}">−</button>
+                    <input type="number" class="attendance-input" data-type="attended" data-index="${index}" value="${item.attended}" min="0" aria-label="Attended classes for ${item.subject}">
+                    <button class="control-btn increment" data-type="attended" data-index="${index}" aria-label="Increase attended count for ${item.subject}">+</button>
+                </div>
+            </td>
+            <td>
+                <div class="input-control">
+                    <button class="control-btn decrement" data-type="total" data-index="${index}" aria-label="Decrease total count for ${item.subject}">−</button>
+                    <input type="number" class="attendance-input" data-type="total" data-index="${index}" value="${item.total}" min="0" aria-label="Total classes for ${item.subject}">
+                    <button class="control-btn increment" data-type="total" data-index="${index}" aria-label="Increase total count for ${item.subject}">+</button>
+                </div>
+            </td>
+            <td class="percentage-cell">${item.percentage}%</td>
+            <td class="skippable-cell">${skippableHtml}</td>
+        </tr>
+    `;
+}
+
+function getSkippableHtml(skippable) {
+    if (skippable > 0) {
+        return `<span class="skippable-skip">✔ Skip ${skippable}</span>`;
+    } else if (skippable < 0) {
+        const need = Math.abs(skippable);
+        return `<span class="skippable-need">✘ Need ${need}</span>`;
+    } else {
+        return '0';
+    }
 }
 
 function handleThresholdChange(e) { updateThreshold(parseInt(e.target.value)); }
@@ -771,8 +957,8 @@ async function fetchAttendance(srn, password, batchId = null) {
         isProcessing = true;
 
         logEvent('fetch.start', { srn }, 'info');
-        logEvent('auth.validating', {}, 'info');
-        logEvent('academy.connecting', {}, 'info');
+        // logEvent('auth.validating', {}, 'info');
+        // logEvent('academy.connecting', {}, 'info');
         const requestStartTime = performance.now();
 
         const response = await fetch('/api/attendance', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' }, body: JSON.stringify({ username: srn, password: password, batch_id: batchId }) });
@@ -785,32 +971,21 @@ async function fetchAttendance(srn, password, batchId = null) {
         const requestDuration = requestEndTime - requestStartTime;
         let durationText; if (requestDuration >= 1000) durationText = `${(requestDuration / 1000).toFixed(1)} seconds`; else durationText = `${Math.round(requestDuration)}ms`;
         logEvent('fetch.server_responded', { duration: durationText }, 'info');
-        logEvent('fetch.parsing', {}, 'info');
+        // logEvent('fetch.parsing', {}, 'info');
 
-        // If server returns redirect, redirect instead of showing data
-        if (data.data?.redirect) {
-            logEvent('mapping.redirect', {}, 'info');
-            window.location = data.data.redirect;
-            return;
-        }
+
 
         const attendanceData = { attendance: data.data.attendance || data.data };
         logEvent('fetch.found_subjects', { count: attendanceData.attendance.length }, 'info');
         Auth.save(srn, password);
-        logEvent('ui.rendering', {}, 'info');
+        // logEvent('ui.rendering', {}, 'info');
         displayAttendance(attendanceData);
         updateUIForLoggedInState();
 
-        // If backend discovered batchClassId(s) at runtime, redirect to GitHub issue for mapping addition
-        const suggestions = data.data?.suggestions || [];
+        // If backend discovered batchClassId(s) at runtime, include them in logs
         const discovered = data.data?.discovered_batch_ids || [];
-        if (suggestions && suggestions.length > 0 && discovered.length > 0) {
-            const prefix = srn.replace(/\d+$/, '');
-            const title = encodeURIComponent(`feat: mappings for ${prefix}`);
-            const body = encodeURIComponent(`## Description\nAdd mappings for ${prefix}.\n\n## Args\n- sem: ${prefix}\n- source: auto-discovered\n- target: [${discovered.join(', ')}]\n\n## Notes\nAny additional context here.`);
-            const issueUrl = `https://github.com/polarhive/attend/issues/new?title=${title}&body=${body}`;
-            logEvent('mapping.auto_discovered', {}, 'info');
-            window.open(issueUrl, '_blank');
+        if (discovered && discovered.length > 0) {
+            logEvent('mapping.auto_discovered', { count: discovered.length }, 'info');
         }
 
 
@@ -821,7 +996,6 @@ async function fetchAttendance(srn, password, batchId = null) {
     } finally {
         setLoadingState(false);
         isProcessing = false;
-        // Clear any semester mode so the button label returns to the base 'Get Attendance'
         clearSubmitMode();
         setSubmitState(false);
     }
@@ -833,65 +1007,79 @@ function cleanUrlParameters() { if (window.location.search) { const cleanUrl = w
 
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    setSubmitState(true, 'Waiting for response...');
     const srn = srnInput.value.toUpperCase();
     const password = document.getElementById('password').value;
-    if (!validateSRN(srn)) { logEvent('validation.invalid_srn', {}, 'error'); setSubmitState(false); return; }
+
+    if (!validateSRN(srn)) {
+        logEvent('validation.invalid_srn', {}, 'error');
+        setSubmitState(false);
+        return;
+    }
     cleanUrlParameters();
 
     const semesterSelect = document.getElementById('semester');
     const selectedBatchId = semesterSelect.value;
 
     if (!availableSemesters) {
-        // First submit: fetch semesters
-        try {
-            setSubmitState(true, 'Fetching semesters...');
-            const resp = await fetch('/api/semesters', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username: srn, password: password })
-            });
-            if (!resp.ok) throw new Error(`Failed to fetch semesters: ${resp.status}`);
-            const data = await resp.json();
-            if (!data.success) throw new Error(data.error?.details || data.message);
-            availableSemesters = data.data.semesters;
-            // Populate dropdown
-            semesterSelect.innerHTML = '<option value="">Select Semester</option>';
-            for (const [id, name] of Object.entries(availableSemesters)) {
-                const option = document.createElement('option');
-                option.value = id;
-                option.textContent = name;
-                semesterSelect.appendChild(option);
-            }
-            // Auto-select the highest semester or saved one
-            const savedBatchId = Auth.credentials.batch_id;
-            if (savedBatchId && availableSemesters[savedBatchId]) {
-                semesterSelect.value = savedBatchId;
-            } else {
-                const maxId = Math.max(...Object.keys(availableSemesters).map(Number));
-                semesterSelect.value = maxId;
-            }
-            // Show semester group
-            document.getElementById('semester-group').style.display = 'block';
-            logEvent('semester.auto_selected', {}, 'info');
-
-            // Change button label to 'Submit' so user knows to submit with selected semester
-            try {
-                setSubmitToSubmitMode();
-            } catch (e) {
-                // ignore any DOM exceptions
-            }
-
-            // restore button state (enabled) so user can pick/submit, but do not overwrite the new label
-            setSubmitState(false, undefined, { skipRestore: true });
-            return;
-        } catch (error) {
-            logEvent('semester.fetch_error', { error: error.message }, 'error');
-            setSubmitState(false);
-            return;
-        }
+        await handleFirstSubmit(srn, password);
+        return;
     }
 
+    await handleAttendanceSubmit(srn, password, selectedBatchId);
+});
+
+async function handleFirstSubmit(srn, password) {
+    setSubmitState(true, 'Fetching semesters...');
+    try {
+        const semesters = await fetchSemesters(srn, password);
+        populateSemesterDropdown(semesters);
+        showSemesterGroup();
+        setSubmitToSubmitMode();
+        setSubmitState(false, undefined, { skipRestore: true });
+    } catch (error) {
+        logEvent('semester.fetch_error', { error: error.message }, 'error');
+        setSubmitState(false);
+    }
+}
+
+async function fetchSemesters(srn, password) {
+    const resp = await fetch('/api/semesters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: srn, password: password })
+    });
+    if (!resp.ok) throw new Error(`Failed to fetch semesters: ${resp.status}`);
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error?.details || data.message);
+    return data.data.semesters;
+}
+
+function populateSemesterDropdown(semesters) {
+    availableSemesters = semesters;
+    const semesterSelect = document.getElementById('semester');
+    semesterSelect.innerHTML = '<option value="">Select Semester</option>';
+    for (const [id, name] of Object.entries(semesters)) {
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = name;
+        semesterSelect.appendChild(option);
+    }
+    // Auto-select the highest semester or saved one
+    const savedBatchId = Auth.credentials.batch_id;
+    if (savedBatchId && semesters[savedBatchId]) {
+        semesterSelect.value = savedBatchId;
+    } else {
+        const maxId = Math.max(...Object.keys(semesters).map(Number));
+        semesterSelect.value = maxId;
+    }
+    logEvent('semester.auto_selected', {}, 'info');
+}
+
+function showSemesterGroup() {
+    document.getElementById('semester-group').style.display = 'block';
+}
+
+async function handleAttendanceSubmit(srn, password, selectedBatchId) {
     // Stage 1 -> Stage 2: fade out login and show loader immediately below navbar
     const formWrapper = document.querySelector('.form-wrapper');
     await fadeOutElement(formWrapper, 220);
@@ -903,7 +1091,7 @@ form.addEventListener('submit', async (e) => {
     Auth.save(srn, password, selectedBatchId);
     await showStage3Result();
     setSubmitState(false);
-});
+}
 srnInput.addEventListener('input', checkSRNValidity);
 document.getElementById('password').addEventListener('input', checkSRNValidity);
 logoutBtn.addEventListener('click', logout);

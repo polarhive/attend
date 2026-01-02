@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -23,13 +23,10 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Install dependencies
-        run: uv sync
+      - name: Enable caching
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
 
       - name: Update sw.js and bundle
         run: uv run main.py --bundle
@@ -38,12 +35,16 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+
+          # Use the latest commit message from the current branch (main) as the deploy commit message
+          current_msg=$(git log -1 --pretty=%B || echo "Update sw.js cache name and bundle assets")
           git checkout -b deploy
-          git add frontend/web/sw.js
+
+          git add -f frontend/web/sw.js
           git add -f frontend/web/bundle.min.js frontend/web/style.min.css
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Update sw.js cache name and bundle assets"
+            git commit -m "$current_msg"
             git push origin deploy --force
           fi

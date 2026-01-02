@@ -7,6 +7,7 @@
     --success: #22c55e;
     --warning: #facc15;
     --danger: #ef4444;
+    --purple: #a855f7;
 
     /* Dark Theme */
     --bg-primary: #0a0a0a;
@@ -352,7 +353,7 @@ body {
 .info-box {
     width: calc(100% - 4rem);
     margin: 0 auto var(--space-6);
-    display: flex;
+    display: none;
     align-items: center;
     gap: 1rem;
     padding: 0.6rem 0.9rem;
@@ -1197,6 +1198,10 @@ body.loading .loading-container {
     display: block;
 }
 
+body.loading .info-box {
+    display: flex;
+}
+
 /* Logs Dropdown */
 .logs-dropdown {
     position: fixed;
@@ -1207,7 +1212,7 @@ body.loading .loading-container {
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    z-index: 1000;
+    z-index: 1200 !important;
 }
 
 .logs-summary {
@@ -1225,7 +1230,7 @@ body.loading .loading-container {
 }
 
 .logs-container {
-    max-height: 300px;
+    max-height: 500px;
     overflow-y: auto;
     padding: 0 var(--space-4) var(--space-4);
 }
@@ -1234,10 +1239,22 @@ body.loading .loading-container {
     padding: var(--space-2) 0;
     font-size: 0.813rem;
     border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
 }
 
 .log-entry:last-child {
     border-bottom: none;
+}
+
+/* Make the message text more visible in dark mode */
+.log-entry>span:last-child {
+    font-weight: 700;
+    color: inherit;
+    /* use inline color if present */
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+    line-height: 1.25;
 }
 
 /* Responsive Design */
