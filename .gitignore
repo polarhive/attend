@@ -34,3 +34,4 @@ Thumbs.db
 results.json
 .vercel
 .env*.local
+*.min.*

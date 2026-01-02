@@ -91,6 +91,14 @@ function buildStaticDOM() {
             <label for="password">Password</label>
             <input type="password" id="password" name="password" required placeholder="••••••••" autocomplete="current-password" />
         </div>
+        <div class="form-group" id="semester-group" style="display: none;">
+            <label for="semester">Semester</label>
+            <div class="select-wrap">
+                <select id="semester" name="semester">
+                    <option value="">Select Semester (optional)</option>
+                </select>
+            </div>
+        </div>
         <button type="submit" class="btn-primary"><span>Get Attendance</span></button>
     `;
 
@@ -124,57 +132,95 @@ const logoutBtn = document.getElementById('logout-btn');
 const notificationContainer = document.getElementById('notification-container');
 const srnInput = document.getElementById('srn');
 const submitButton = document.querySelector('#attendance-form button[type="submit"]');
+const submitLabel = submitButton.querySelector('span') || submitButton;
+let submitInSemesterMode = false; // true when label changed to 'Submit' after semester fetch
+
+// Ensure we have a stable base label to restore to later
+if (submitLabel && !submitLabel.dataset.base) submitLabel.dataset.base = submitLabel.textContent;
+else if (!submitLabel && !submitButton.dataset.base) submitButton.dataset.base = submitButton.innerText;
+
+// Accessible live status for screen readers
+const statusLive = document.createElement('div');
+statusLive.id = 'status-live';
+statusLive.setAttribute('role', 'status');
+statusLive.setAttribute('aria-live', 'polite');
+statusLive.style.position = 'absolute';
+statusLive.style.left = '-9999px';
+document.body.appendChild(statusLive);
+
+function setSubmitState(isWaiting, message, options = {}) {
+    if (isWaiting) {
+        submitButton.disabled = true;
+        submitButton.classList.add('loading');
+        if (submitLabel) {
+            if (!submitLabel.dataset.orig) submitLabel.dataset.orig = submitLabel.textContent;
+            submitLabel.textContent = message || 'Waiting for response...';
+        } else {
+            if (!submitButton.dataset.orig) submitButton.dataset.orig = submitButton.innerText;
+            submitButton.innerText = message || 'Waiting for response...';
+        }
+        statusLive.textContent = message || 'Waiting for response...';
+    } else {
+        // If skipRestore is true we should not restore dataset.orig (used after semester fetch)
+        submitButton.disabled = false;
+        submitButton.classList.remove('loading');
+        if (options.skipRestore) {
+            // keep whatever label is currently set (e.g., 'Submit')
+        } else {
+            // If there is an orig (from the last loading), restore it. Otherwise restore base label if needed.
+            if (submitLabel && submitLabel.dataset.orig) {
+                submitLabel.textContent = submitLabel.dataset.orig;
+                delete submitLabel.dataset.orig;
+            } else if (submitButton.dataset.orig) {
+                submitButton.innerText = submitButton.dataset.orig;
+                delete submitButton.dataset.orig;
+            } else {
+                // If no orig, but we have been in semester mode and not cleared, keep 'Submit'
+                if (submitInSemesterMode) {
+                    // keep as-is
+                } else {
+                    // restore base label if present
+                    if (submitLabel && submitLabel.dataset.base) submitLabel.textContent = submitLabel.dataset.base;
+                    else if (submitButton.dataset.base) submitButton.innerText = submitButton.dataset.base;
+                }
+            }
+        }
+        statusLive.textContent = '';
+    }
+}
+
+function setSubmitToSubmitMode() {
+    submitInSemesterMode = true;
+    if (submitLabel) {
+        if (!submitLabel.dataset.base) submitLabel.dataset.base = submitLabel.textContent;
+        submitLabel.textContent = 'Submit';
+    } else {
+        if (!submitButton.dataset.base) submitButton.dataset.base = submitButton.innerText;
+        submitButton.innerText = 'Submit';
+    }
+}
+
+function clearSubmitMode() {
+    submitInSemesterMode = false;
+    if (submitLabel && submitLabel.dataset.base) {
+        submitLabel.textContent = submitLabel.dataset.base;
+        delete submitLabel.dataset.base;
+    } else if (submitButton.dataset.base) {
+        submitButton.innerText = submitButton.dataset.base;
+        delete submitButton.dataset.base;
+    }
+}
 
 // --- Begin copied app logic (adapted from original script.js) ---
 
 // Constants and Configuration
-let SRN_REGEX = null;
-
-function buildSrnRegexFromMapping(mapping) {
-    const mappingKeys = Object.keys(mapping?.BATCH_CLASS_ID_MAPPING || {});
-    const groups = {};
-
-    mappingKeys.forEach(key => {
-        if (!key.startsWith('PES')) return;
-        const rest = key.slice(3);
-        const batch = rest.slice(0, 5);
-        const branch = rest.slice(5);
-        if (!groups[batch]) groups[batch] = new Set();
-        if (branch) groups[batch].add(branch);
-    });
-
-    const parts = Object.entries(groups).map(([batch, branchSet]) => {
-        const branches = Array.from(branchSet);
-        if (branches.length === 0) return batch;
-        if (branches.length === 1) return `${batch}${branches[0]}`;
-        return `${batch}(?:${branches.join('|')})`;
-    });
-
-    if (parts.length === 0) {
-        return new RegExp('^$');
-    }
-
-    const pattern = `^PES(?:${parts.join('|')})\\d{3}$`;
-    return new RegExp(pattern);
-}
-
-async function loadMappingAndBuildRegex() {
-    try {
-        const resp = await fetch('/mapping.json', {cache: 'no-cache'});
-        if (!resp.ok) throw new Error(`Failed to fetch mapping.json: ${resp.status}`);
-        const mapping = await resp.json();
-        SRN_REGEX = buildSrnRegexFromMapping(mapping);
-        logMessage('SRN regex generated from mapping.json', 'info');
-    } catch (err) {
-        SRN_REGEX = null;
-        logMessage(`Could not load mapping.json: ${err.message}`, 'error');
-    }
-}
+let SRN_REGEX = /^PES[12](?:UG|PG)\d{2}[A-Z]{2}\d{3}$/;
 
 // Global State
 let isProcessing = false;
 let currentAttendanceData = null;
 let isOffline = false;
+let availableSemesters = null;
 // Track whether stage-2 loader has already been shown to avoid duplicates
 let stage2Shown = false;
 
@@ -318,30 +364,30 @@ function logMessage(message, type = 'info') {
         setTimeout(() => notif.remove(), 3000);
     }
 
-    const timestamp = new Date().toLocaleTimeString('en-US', { 
-        hour12: false, 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit' 
+    const timestamp = new Date().toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
     });
-    
+
     const logEntry = document.createElement('div');
     logEntry.className = 'log-entry';
-    
+
     const timeSpan = document.createElement('span');
     timeSpan.style.color = 'var(--text-tertiary)';
     timeSpan.style.marginRight = '0.5rem';
     timeSpan.textContent = `[${timestamp}]`;
-    
+
     const messageSpan = document.createElement('span');
     messageSpan.style.color = (type === 'error') ? 'var(--danger)' : 'var(--text-secondary)';
     messageSpan.textContent = message;
-    
+
     logEntry.appendChild(timeSpan);
     logEntry.appendChild(messageSpan);
     logsContainer.appendChild(logEntry);
     logsSummary.textContent = `Show Logs (${logsContainer.childElementCount})`;
-    
+
     const loadingLogs = document.getElementById('loading-logs');
     if (loadingLogs && document.body.classList.contains('loading')) {
         const loadingLogEntry = document.createElement('div');
@@ -358,6 +404,8 @@ function clearLogs() {
     logsDropdown.open = false;
 }
 
+
+
 function generateAttendanceChart(attendanceData, customThreshold = null) {
     const ctx = document.getElementById('attendanceChart').getContext('2d');
     if (window.attendanceChart instanceof Chart) {
@@ -372,7 +420,7 @@ function generateAttendanceChart(attendanceData, customThreshold = null) {
     window.attendanceChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: subjects.map((subject, index) => 
+            labels: subjects.map((subject, index) =>
                 `${subject}\n${attendedData[index]}/${attendedData[index] + skippedData[index]}`
             ),
             datasets: [
@@ -590,7 +638,7 @@ function updateUIForLoggedInState() {
         const formHidden = !formEl || getComputedStyle(formEl).display === 'none';
         if (formHidden && resultEmpty && !isProcessing && !stage2Shown) {
             // show loader immediately but don't await
-            showStage2Loader().catch(() => {});
+            showStage2Loader().catch(() => { });
         }
     } catch (e) {
         // ignore any errors from computed style
@@ -607,14 +655,16 @@ const Cookies = {
 const ThresholdManager = { getThreshold: () => { const saved = Cookies.get('threshold'); return saved ? parseInt(saved) : 75; }, saveThreshold: (threshold) => { Cookies.set('threshold', threshold.toString(), 365); } };
 
 const Auth = {
-    credentials: { srn: null, password: null },
-    loadFromCookies: () => { const srn = Cookies.get('srn'); const password = Cookies.get('password'); if (srn && password) { Auth.credentials.srn = srn; Auth.credentials.password = password; return true; } return false; },
-    save: (srn, password) => { Auth.credentials.srn = srn.toUpperCase(); Auth.credentials.password = password; Cookies.set('srn', srn.toUpperCase(), 365); Cookies.set('password', password, 365); },
-    clear: () => { Auth.credentials.srn = null; Auth.credentials.password = null; Cookies.delete('srn'); Cookies.delete('password'); Cookies.delete('threshold'); },
+    credentials: { srn: null, password: null, batch_id: null },
+    loadFromCookies: () => { const srn = Cookies.get('srn'); const password = Cookies.get('password'); const batch_id = Cookies.get('batch_id'); if (srn && password) { Auth.credentials.srn = srn; Auth.credentials.password = password; Auth.credentials.batch_id = batch_id; return true; } return false; },
+    save: (srn, password, batch_id = null) => { Auth.credentials.srn = srn.toUpperCase(); Auth.credentials.password = password; Auth.credentials.batch_id = batch_id; Cookies.set('srn', srn.toUpperCase(), 365); Cookies.set('password', password, 365); if (batch_id) Cookies.set('batch_id', batch_id, 365); },
+    clear: () => { Auth.credentials.srn = null; Auth.credentials.password = null; Auth.credentials.batch_id = null; Cookies.delete('srn'); Cookies.delete('password'); Cookies.delete('batch_id'); Cookies.delete('threshold'); },
     isLoggedIn: () => { return Boolean(Auth.credentials.srn && Auth.credentials.password); }
 };
 
-function validateSRN(srn) { if (!SRN_REGEX) return true; return SRN_REGEX.test(srn.toUpperCase()); }
+function validateSRN(srn) {
+    return SRN_REGEX.test(srn.toUpperCase());
+}
 
 function checkSRNValidity() {
     const srn = srnInput.value.toUpperCase();
@@ -622,32 +672,31 @@ function checkSRNValidity() {
     if (srn && !isValid) {
         srnInput.classList.add('invalid');
         submitButton.disabled = true;
-        if (srn.length === 13) {
-            logMessage("SRN not in mapping: open a PR on GitHub", "error");
-            setTimeout(() => { window.location.href = "https://github.com/polarhive/attend"; }, 2000);
-        }
     } else {
         srnInput.classList.remove('invalid');
-        submitButton.disabled = false;
+        submitButton.disabled = !srn || !document.getElementById('password').value;
     }
 }
 
-async function fetchAttendance(srn, password) {
+async function fetchAttendance(srn, password, batchId = null) {
     if (isProcessing) { logMessage("Request already in progress", "error"); return; }
     if (isOffline) { logMessage("You are offline. Cannot fetch new attendance data.", "error"); return; }
     try {
+        // Ensure button shows fetch state
+        setSubmitState(true, 'Fetching attendance...');
+
         clearLogs();
         setLoadingState(true);
         isProcessing = true;
         const loadingLogs = document.getElementById('loading-logs'); if (loadingLogs) { loadingLogs.innerHTML = ''; }
-        if (!validateSRN(srn)) { logMessage("Invalid SRN format", "error"); setLoadingState(false); isProcessing = false; return; }
+        if (!validateSRN(srn)) { logMessage("SRN not present in mapping; attempting to auto-discover after authentication", "info"); }
 
         logMessage(`Initiating attendance fetch for ${srn}`, "info");
         logMessage("Validating credentials...", "info");
         logMessage("Connecting to PESU Academy...", "info");
         const requestStartTime = performance.now();
 
-        const response = await fetch('/api/attendance', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' }, body: JSON.stringify({ username: srn, password: password }) });
+        const response = await fetch('/api/attendance', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' }, body: JSON.stringify({ username: srn, password: password, batch_id: batchId }) });
 
         if (!response.ok) { const errorData = await response.json(); const errorMessage = errorData.error?.details || errorData.message || `HTTP error! status: ${response.status}`; throw new Error(errorMessage); }
 
@@ -658,12 +707,34 @@ async function fetchAttendance(srn, password) {
         let durationText; if (requestDuration >= 1000) durationText = `${(requestDuration / 1000).toFixed(1)} seconds`; else durationText = `${Math.round(requestDuration)}ms`;
         logMessage(`✓ Server responded in ${durationText}`, "info");
         logMessage(`✓ Parsing attendance data...`, "info");
+
+        // If server returns redirect, redirect instead of showing data
+        if (data.data?.redirect) {
+            logMessage('Redirecting to add mappings...', 'info');
+            window.location = data.data.redirect;
+            return;
+        }
+
         const attendanceData = { attendance: data.data.attendance || data.data };
         logMessage(`✓ Found ${attendanceData.attendance.length} subjects`, "info");
         Auth.save(srn, password);
         logMessage(`✓ Rendering attendance visualization...`, "info");
         displayAttendance(attendanceData);
         updateUIForLoggedInState();
+
+        // If backend discovered batchClassId(s) at runtime, redirect to GitHub issue for mapping addition
+        const suggestions = data.data?.suggestions || [];
+        const discovered = data.data?.discovered_batch_ids || [];
+        if (suggestions && suggestions.length > 0 && discovered.length > 0) {
+            const prefix = srn.replace(/\d+$/, '');
+            const title = encodeURIComponent(`feat: mappings for ${prefix}`);
+            const body = encodeURIComponent(`## Description\nAdd mappings for ${prefix}.\n\n## Args\n- sem: ${prefix}\n- source: auto-discovered\n- target: [${discovered.join(', ')}]\n\n## Notes\nAny additional context here.`);
+            const issueUrl = `https://github.com/polarhive/attend/issues/new?title=${title}&body=${body}`;
+            logMessage('Auto-discovered batch IDs; redirecting to GitHub issue for mapping addition.', 'info');
+            window.open(issueUrl, '_blank');
+        }
+
+
         logMessage(`✓ All done! Attendance loaded successfully`, "info");
     } catch (error) {
         logMessage(`Error: ${error.message}`, "error");
@@ -671,6 +742,9 @@ async function fetchAttendance(srn, password) {
     } finally {
         setLoadingState(false);
         isProcessing = false;
+        // Clear any semester mode so the button label returns to the base 'Get Attendance'
+        clearSubmitMode();
+        setSubmitState(false);
     }
 }
 
@@ -680,10 +754,64 @@ function cleanUrlParameters() { if (window.location.search) { const cleanUrl = w
 
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    setSubmitState(true, 'Waiting for response...');
     const srn = srnInput.value.toUpperCase();
     const password = document.getElementById('password').value;
-    if (!validateSRN(srn)) { logMessage("Invalid SRN format", "error"); return; }
+    if (!validateSRN(srn)) { logMessage("Invalid SRN format", "error"); setSubmitState(false); return; }
     cleanUrlParameters();
+
+    const semesterSelect = document.getElementById('semester');
+    const selectedBatchId = semesterSelect.value;
+
+    if (!availableSemesters) {
+        // First submit: fetch semesters
+        try {
+            setSubmitState(true, 'Fetching semesters...');
+            const resp = await fetch('/api/semesters', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: srn, password: password })
+            });
+            if (!resp.ok) throw new Error(`Failed to fetch semesters: ${resp.status}`);
+            const data = await resp.json();
+            if (!data.success) throw new Error(data.error?.details || data.message);
+            availableSemesters = data.data.semesters;
+            // Populate dropdown
+            semesterSelect.innerHTML = '<option value="">Select Semester</option>';
+            for (const [id, name] of Object.entries(availableSemesters)) {
+                const option = document.createElement('option');
+                option.value = id;
+                option.textContent = name;
+                semesterSelect.appendChild(option);
+            }
+            // Auto-select the highest semester or saved one
+            const savedBatchId = Auth.credentials.batch_id;
+            if (savedBatchId && availableSemesters[savedBatchId]) {
+                semesterSelect.value = savedBatchId;
+            } else {
+                const maxId = Math.max(...Object.keys(availableSemesters).map(Number));
+                semesterSelect.value = maxId;
+            }
+            // Show semester group
+            document.getElementById('semester-group').style.display = 'block';
+            logMessage("Semester auto-selected, submit to get attendance", "info");
+
+            // Change button label to 'Submit' so user knows to submit with selected semester
+            try {
+                setSubmitToSubmitMode();
+            } catch (e) {
+                // ignore any DOM exceptions
+            }
+
+            // restore button state (enabled) so user can pick/submit, but do not overwrite the new label
+            setSubmitState(false, undefined, { skipRestore: true });
+            return;
+        } catch (error) {
+            logMessage(`Error fetching semesters: ${error.message}`, "error");
+            setSubmitState(false);
+            return;
+        }
+    }
 
     // Stage 1 -> Stage 2: fade out login and show loader immediately below navbar
     const formWrapper = document.querySelector('.form-wrapper');
@@ -691,10 +819,14 @@ form.addEventListener('submit', async (e) => {
     await showStage2Loader();
 
     // Fetch and then reveal results
-    await fetchAttendance(srn, password);
+    await fetchAttendance(srn, password, selectedBatchId || null);
+    // Save credentials including batch_id
+    Auth.save(srn, password, selectedBatchId);
     await showStage3Result();
+    setSubmitState(false);
 });
 srnInput.addEventListener('input', checkSRNValidity);
+document.getElementById('password').addEventListener('input', checkSRNValidity);
 logoutBtn.addEventListener('click', logout);
 
 const thresholdSlider = document.getElementById('threshold-slider');
@@ -713,7 +845,6 @@ if (thresholdSlider) { thresholdSlider.addEventListener('input', handleThreshold
     }
 
     window.addEventListener('load', async () => {
-        loadMappingAndBuildRegex();
         cleanUrlParameters();
         if (hasSavedCredentials && Auth.loadFromCookies()) {
             // Auto-login flow: fade out the form, show loader, fetch, then show results
@@ -723,7 +854,7 @@ if (thresholdSlider) { thresholdSlider.addEventListener('input', handleThreshold
                 if (formWrapper) await fadeOutElement(formWrapper, 200);
                 await showStage2Loader();
                 if (Auth.credentials.srn && Auth.credentials.password) {
-                    await fetchAttendance(Auth.credentials.srn, Auth.credentials.password);
+                    await fetchAttendance(Auth.credentials.srn, Auth.credentials.password, Auth.credentials.batch_id);
                     await showStage3Result();
                 }
             } catch (e) {
@@ -732,6 +863,13 @@ if (thresholdSlider) { thresholdSlider.addEventListener('input', handleThreshold
             }
         } else {
             updateUIForLoggedInState();
+            // If semester group is already visible (e.g., from saved cookies), keep the button in Submit mode
+            try {
+                const semGroup = document.getElementById('semester-group');
+                if (semGroup && getComputedStyle(semGroup).display !== 'none') {
+                    setSubmitToSubmitMode();
+                }
+            } catch (e) { /* ignore */ }
         }
     });
 })();
@@ -739,32 +877,32 @@ if (thresholdSlider) { thresholdSlider.addEventListener('input', handleThreshold
 window.addEventListener('popstate', () => { updateUIForLoggedInState(); });
 
 if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function() {
+    window.addEventListener('load', function () {
         navigator.serviceWorker.register('/sw.js')
-            .then(function(registration) {
-                registration.addEventListener('updatefound', function() {
+            .then(function (registration) {
+                registration.addEventListener('updatefound', function () {
                     const newWorker = registration.installing;
-                    newWorker.addEventListener('statechange', function() {
+                    newWorker.addEventListener('statechange', function () {
                         if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
                             logMessage('App updated! Refresh to get the latest version.', 'info');
                         }
                     });
                 });
             })
-            .catch(function(err) { logMessage('ServiceWorker registration failed', 'error'); });
+            .catch(function (err) { logMessage('ServiceWorker registration failed', 'error'); });
     });
 }
 
-window.addEventListener('online', function() {
+window.addEventListener('online', function () {
     isOffline = false;
     hideOfflineBanner();
     offlineIndicator.style.display = 'none';
     logMessage('Back online! You can fetch new attendance data.', 'info');
 });
 
-window.addEventListener('offline', function() {
+window.addEventListener('offline', function () {
     isOffline = true;
-    showOfflineBanner().catch(() => {});
+    showOfflineBanner().catch(() => { });
     logMessage('You are offline. App will work with cached data.', 'info');
 });
 

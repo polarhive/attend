@@ -1,13 +1,10 @@
 // Service Worker for caching attendance tracker assets
-const CACHE_NAME = 'attendance-tracker-v6';
+const VERSION = 'v0.7.0';
+const CACHE_NAME = 'attendance-tracker-' + VERSION;
 const urlsToCache = [
-  '/',
-  '/i.js',
   '/index.html',
-  '/style.css',
-  '/script.js',
-  '/mapping.json',
-  '/chart.min.js',
+  '/style.min.css',
+  '/bundle.min.js',
   '/favicon.ico',
 ];
 

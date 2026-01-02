@@ -2,12 +2,6 @@
     "CONTROLLER_MODE": 6407,
     "ACTION_TYPE": 8,
     "MENU_ID": 660,
-    "BATCH_CLASS_ID_MAPPING": {
-        "PES2UG25CS": [
-            2972,
-            2973
-        ]
-    },
     "SUBJECT_MAPPING": {
         "UE23CS241B": "DAA",
         "UE23CS242B": "OS",

@@ -13,25 +13,28 @@ Examples:
     export ENABLE_BACKEND_TELEGRAM=true
     uv run main.py
 """
-import os
-import re
-import json
-import logging
-import time
-from pathlib import Path
-from typing import Dict, List, Optional, Union, Any
+import colorama
+from colorama import Fore, Style
 
 import uvicorn
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote, urlencode
 from fastapi import FastAPI, APIRouter, HTTPException, status, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from fastapi.middleware.gzip import GZipMiddleware
 from dataclasses import dataclass
 import subprocess
 import atexit
 import sys
+from typing import Dict, Any, Optional, Union, List
+import os
+import time
+import json
+import logging
+from pathlib import Path
+import re
 
 
 class APIResponse:
@@ -93,79 +96,15 @@ class MappingsConfig:
         self.CONTROLLER_MODE = config.get("CONTROLLER_MODE")
         self.ACTION_TYPE = config.get("ACTION_TYPE")
         self.MENU_ID = config.get("MENU_ID")
-        self.BATCH_CLASS_ID_MAPPING = config.get("BATCH_CLASS_ID_MAPPING", {})
         self.SUBJECT_MAPPING = config.get("SUBJECT_MAPPING", {})
 
     def get_branch_config(self, srn: str) -> MappingsData:
-        # Build a dynamic regex from configured batch keys so SRN validation
-        # stays in sync with `BATCH_CLASS_ID_MAPPING` in mapping.json.
-        keys = list(self.BATCH_CLASS_ID_MAPPING.keys())
-
-        # Normalize keys to remove leading 'PES' for pattern building
-        normalized = []
-        for k in keys:
-            if k.startswith("PES"):
-                normalized.append(k[3:])
-            else:
-                normalized.append(k)
-
-        # Group by batch prefix (first 5 chars, e.g. '2UG23') and collect branches
-        groups = {}
-        for token in normalized:
-            batch = token[:5]
-            branch = token[5:]
-            groups.setdefault(batch, set())
-            if branch:
-                groups[batch].add(branch)
-
-        parts = []
-        for batch, branch_set in groups.items():
-            if not branch_set:
-                parts.append(batch)
-            else:
-                branches = sorted(branch_set)
-                if len(branches) == 1:
-                    parts.append(f"{batch}{branches[0]}")
-                else:
-                    parts.append(f"{batch}(?:{'|'.join(branches)})")
-
-        # If no mappings were configured, skip strict SRN validation and
-        # allow runtime discovery of batchClassId after authentication.
-        if not parts:
-            # No configured parts to validate against — proceed permissively.
-            pattern = None
-        else:
-            pattern = rf"^PES(?:{'|'.join(parts)})\d{{3}}$"
-            # Only enforce validation when we have a meaningful pattern.
-            if not re.match(pattern, srn):
-                try:
-                    app_logger.debug(
-                        f"SRN '{srn}' does not match configured validation pattern; proceeding permissively"
-                    )
-                except Exception:
-                    pass
-                # Do not raise; allow lookup to proceed and rely on runtime discovery.
-
-        # Determine the exact mapping key by checking which configured key the SRN starts with
-        full_prefix = None
-        for k in keys:
-            if srn.startswith(k):
-                full_prefix = k
-                break
-
-        # If the mapping key is not present or its configured value is missing,
-        # do not raise an error here. We will attempt to discover the
-        # appropriate batchClassId dynamically after authentication.
-        if full_prefix is None:
-            batch_class_id = None
-        else:
-            batch_class_id = self.BATCH_CLASS_ID_MAPPING.get(full_prefix)
-
+        # Return default config since batch mappings are handled dynamically
         return MappingsData(
             controller_mode=self.CONTROLLER_MODE,
             action_type=self.ACTION_TYPE,
             menu_id=self.MENU_ID,
-            batchClassId=batch_class_id,
+            batchClassId=None,
             subject_mapping=self.SUBJECT_MAPPING,
         )
 
@@ -242,8 +181,11 @@ def load_app_settings() -> AppSettings:
 
 def setup_logger(name=None, level=None, format_str=None):
     """Set up a logger with console output."""
+    # Initialize colorama for colored output
+    colorama.init()
+
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    default_format = "%(asctime)s - %(levelname)s - %(message)s"
+    default_format = "%(levelname)s: %(message)s"
 
     logger = logging.getLogger(name)
     logger.setLevel(level or log_level)
@@ -252,9 +194,26 @@ def setup_logger(name=None, level=None, format_str=None):
     if logger.hasHandlers():
         logger.handlers.clear()
 
+    # Colored formatter
+    class ColoredFormatter(logging.Formatter):
+        def format(self, record):
+            if record.levelno == logging.DEBUG:
+                color = Fore.CYAN
+            elif record.levelno == logging.INFO:
+                color = Fore.GREEN
+            elif record.levelno == logging.WARNING:
+                color = Fore.YELLOW
+            elif record.levelno == logging.ERROR:
+                color = Fore.RED
+            else:
+                color = Fore.WHITE
+            record.levelname = f"{color}{record.levelname}{Style.RESET_ALL}"
+            record.message = f"{color}{record.getMessage()}{Style.RESET_ALL}"
+            return super().format(record)
+
     # Add console handler
     console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter(format_str or default_format))
+    console_handler.setFormatter(ColoredFormatter(format_str or default_format))
     logger.addHandler(console_handler)
 
     # Prevent propagation to root to avoid duplicate logs
@@ -283,7 +242,9 @@ class AttendanceScrapingError(Exception):
 class PESUAttendanceScraper:
     BASE_URL = "https://www.pesuacademy.com/Academy"
 
-    def __init__(self, username: str, password: str) -> None:
+    def __init__(
+        self, username: str, password: str, batch_id: Optional[int] = None
+    ) -> None:
         self.session = requests.Session()
         # Provide browser-like defaults so the site responds with the same CSRF & cookies
         self.session.headers.update(
@@ -303,25 +264,19 @@ class PESUAttendanceScraper:
             self.batch_class_ids = branch_config.batchClassId
             self.subject_mapping = branch_config.subject_mapping
 
+            # If a specific batch_id is provided, use it instead
+            if batch_id is not None:
+                self.batch_class_ids = [batch_id]
+
             # Track whether batchClassId(s) were auto-discovered at runtime and
             # an optional suggestion message to ask the user to open a PR.
-            self._auto_discovered_batch_ids: Optional[List[str]] = None
+            self._auto_discovered_batch_ids: Optional[List[int]] = None
             self._pr_suggestion: Optional[str] = None
+            self.sem_texts: Optional[Dict[int, str]] = None
 
             # Extract branch prefix from username for logging
-            # Derive a human-friendly branch prefix for logging by matching the
-            # configured mapping keys (fall back to a slice of username).
-            full_prefix = None
-            for k in mappings.BATCH_CLASS_ID_MAPPING.keys():
-                if username.startswith(k):
-                    full_prefix = k
-                    break
-
-            if full_prefix:
-                # strip leading 'PES' for compact display (e.g. '2UG23CS')
-                self.branch_prefix = full_prefix[3:]
-            else:
-                self.branch_prefix = username[:10]
+            # Derive a human-friendly branch prefix for logging
+            self.branch_prefix = username[:10]
 
         except ValueError as e:
             raise ConfigurationError(f"Configuration error: {e}")
@@ -504,31 +459,30 @@ class PESUAttendanceScraper:
             # from the semesters endpoint used by the profile page.
             if not self.batch_class_ids:
                 try:
-                    fetched = self._fetch_semester_batch_ids(csrf_after)
-                    if fetched:
+                    ids, texts = self._fetch_semester_batch_ids(csrf_after)
+                    if ids:
                         # Record that these were auto-discovered so the API can
                         # surface a helpful suggestion to the user.
-                        self._auto_discovered_batch_ids = fetched
+                        self._auto_discovered_batch_ids = ids
+                        self.sem_texts = texts
 
                         # Use a single value when only one option is found, else keep the list
-                        self.batch_class_ids = (
-                            fetched if len(fetched) > 1 else fetched[0]
-                        )
+                        self.batch_class_ids = ids if len(ids) > 1 else ids[0]
 
                         # Build a concise PR suggestion message that includes the
                         # SRN prefix (username with trailing digits removed) and the
                         # discovered batchClassId(s).
                         try:
                             prefix = re.sub(r"\d+$", "", self.username)
-                            ids = ",".join(fetched)
+                            ids_str = ",".join(str(x) for x in ids)
                             msg = (
-                                f"Auto-discovered batchClassId(s) for SRN prefix '{prefix}': {ids}. "
-                                "Consider opening a PR to add this mapping to 'frontend/web/mapping.json' under 'BATCH_CLASS_ID_MAPPING'."
+                                f"Auto-discovered batchClassId(s) for SRN prefix '{prefix}': {ids_str}. "
+                                "Consider opening a PR to add this mapping to 'frontend/web/mapping.json'."
                             )
                             self._pr_suggestion = msg
                         except Exception:
                             self._pr_suggestion = (
-                                f"Auto-discovered batchClassId(s): {fetched}. "
+                                f"Auto-discovered batchClassId(s): {ids}. "
                                 "Consider opening a PR to add this mapping to 'frontend/web/mapping.json'."
                             )
 
@@ -658,7 +612,9 @@ class PESUAttendanceScraper:
 
         return csrf_token
 
-    def _fetch_semester_batch_ids(self, csrf_token: str) -> Optional[List[str]]:
+    def _fetch_semester_batch_ids(
+        self, csrf_token: str
+    ) -> tuple[Optional[List[int]], Optional[Dict[int, str]]]:
         """
         Fetch semester options and return a list of `value` attributes found in
         the <option> tags (e.g., batchClassId values). Returns None if nothing
@@ -676,20 +632,60 @@ class PESUAttendanceScraper:
                 url, params={"_": int(time.time() * 1000)}, headers=headers, timeout=15
             )
             resp.raise_for_status()
+            app_logger.debug(
+                f"Semester response content-type: {resp.headers.get('content-type')}"
+            )
             soup = BeautifulSoup(resp.text, "html.parser")
             options = soup.find_all("option")
-            values: List[str] = []
-            for opt in options:
-                val = opt.get("value")
-                if val and re.search(r"\d+", val):
-                    values.append(val)
-            return values if values else None
+            app_logger.debug(f"Found {len(options)} option tags in semester response")
+            values: List[int] = []
+            texts: Dict[int, str] = {}
+            if options:
+                for opt in options:
+                    val = opt.get("value")
+                    text = opt.get_text(strip=True)
+                    app_logger.debug(f"Option value: {val}, text: {text}")
+                    if val:
+                        try:
+                            # Strip quotes if present and convert to int
+                            clean_val = "".join(filter(str.isdigit, val))
+                            id_int = int(clean_val)
+                            values.append(id_int)
+                            texts[id_int] = text
+                            app_logger.debug(f"Parsed batch ID: {id_int}, text: {text}")
+                        except ValueError:
+                            app_logger.debug(f"Skipping invalid value: {val}")
+                            continue
+            else:
+                # Perhaps it's JSON
+                try:
+                    data = resp.json()
+                    app_logger.info(f"Parsed as JSON: {data}")
+                    if isinstance(data, list):
+                        for item in data:
+                            val = item.get("value")
+                            text = item.get("text", item.get("label", ""))
+                            if val:
+                                try:
+                                    clean_val = "".join(filter(str.isdigit, str(val)))
+                                    id_int = int(clean_val)
+                                    values.append(id_int)
+                                    texts[id_int] = text
+                                    app_logger.debug(
+                                        f"Parsed batch ID from JSON: {id_int}, text: {text}"
+                                    )
+                                except ValueError:
+                                    continue
+                except Exception as e:
+                    app_logger.debug(f"Could not parse as JSON: {e}")
+            app_logger.debug(f"Available semesters: {texts}")
+            return (values if values else None, texts if texts else None)
         except requests.RequestException as e:
             app_logger.debug(f"Failed to fetch semester batch ids: {e}")
             return None
 
     def scrape_attendance_data(self) -> Optional[List[List[str]]]:
-        app_logger.info(
+        app_logger.debug(
             f"Starting attendance data scraping for branch: {self.branch_prefix}"
         )
 
@@ -699,17 +695,18 @@ class PESUAttendanceScraper:
 
             # If batch class IDs are not configured (None/empty), attempt to fetch them
             if not self.batch_class_ids:
-                fetched = self._fetch_semester_batch_ids(csrf_token)
-                if fetched:
+                ids, texts = self._fetch_semester_batch_ids(csrf_token)
+                if ids:
                     # Record auto-discovery and build suggestion message
-                    self._auto_discovered_batch_ids = fetched
-                    self.batch_class_ids = fetched if len(fetched) > 1 else fetched[0]
+                    self._auto_discovered_batch_ids = ids
+                    self.sem_texts = texts
+                    self.batch_class_ids = ids if len(ids) > 1 else ids[0]
                     try:
                         prefix = re.sub(r"\d+$", "", self.username)
-                        ids = ",".join(fetched)
+                        ids_str = ",".join(str(x) for x in ids)
                         msg = (
-                            f"Auto-discovered batchClassId(s) for SRN prefix '{prefix}': {ids}. "
-                            "Consider opening a PR to add this mapping to 'frontend/web/mapping.json' under 'BATCH_CLASS_ID_MAPPING'."
+                            f"Auto-discovered batchClassId(s) for SRN prefix '{prefix}': {ids_str}. "
+                            "Consider opening a PR to add this mapping to 'frontend/web/mapping.json'."
                         )
                         self._pr_suggestion = msg
                         app_logger.info(
@@ -862,14 +859,14 @@ class PESUAttendanceScraper:
 
 
 def fetch_student_attendance(
-    username: str, password: str
+    username: str, password: str, batch_id: Optional[int] = None
 ) -> tuple[Optional[List[List[str]]], PESUAttendanceScraper]:
     """Convenience function that returns (attendance_data, scraper) for external usage.
 
     The returned scraper may contain an informational suggestion if batchClassId(s)
     were auto-discovered during login or scraping.
     """
-    scraper = PESUAttendanceScraper(username, password)
+    scraper = PESUAttendanceScraper(username, password, batch_id)
 
     try:
         scraper.login()
@@ -886,7 +883,9 @@ AttendanceRequest = Dict[str, Any]
 AttendanceResponse = Dict[str, Any]
 
 
-async def process_attendance_task(username: str, password: str) -> Dict[str, Any]:
+async def process_attendance_task(
+    username: str, password: str, batch_id: Optional[int] = None
+) -> Dict[str, Any]:
     """Process attendance data and return results synchronously."""
     # Initialize scraper as None to handle edge cases
     scraper: Optional[PESUAttendanceScraper] = None
@@ -896,7 +895,9 @@ async def process_attendance_task(username: str, password: str) -> Dict[str, Any
 
         # Initialize scraper for subject mapping access (for client-friendly labels)
         # Fetch attendance data using convenience function which also returns the scraper
-        attendance_data, used_scraper = fetch_student_attendance(username, password)
+        attendance_data, used_scraper = fetch_student_attendance(
+            username, password, batch_id
+        )
 
         if not attendance_data:
             raise AttendanceScrapingError("No attendance data retrieved")
@@ -908,6 +909,36 @@ async def process_attendance_task(username: str, password: str) -> Dict[str, Any
             attendance_data, used_scraper.subject_mapping
         )
 
+        # If we auto-discovered batchClassIds, redirect to issue instead of showing data
+        if getattr(used_scraper, "_pr_suggestion", None) and getattr(
+            used_scraper, "_auto_discovered_batch_ids", None
+        ):
+            prefix = re.sub(r"\d+$", "", username)
+            discovered = used_scraper._auto_discovered_batch_ids
+            title = f"feat: adding (sem)/{prefix}"
+            sem_texts = getattr(used_scraper, "sem_texts", {}) or {}
+            target_list = [
+                f"{id} ({sem_texts.get(id, 'Unknown')})" for id in discovered
+            ]
+            body = f"""## Description
+Add mappings for {prefix}.
+
+## Args
+- srn: {username}
+- sem: {prefix}
+- source: auto-discovered
+- target: [{', '.join(target_list)}]
+
+## Suggested Mapping
+```json
+"{prefix}": [{', '.join(str(x) for x in discovered)}]
+```
+
+## Notes
+Any additional context here."""
+            issue_url = f"https://github.com/polarhive/attend/issues/new?{urlencode({'title': title, 'body': body})}"
+            return {"redirect": issue_url}
+
         result = {
             "status": "complete",
             "attendance": formatted_attendance,
@@ -916,6 +947,12 @@ async def process_attendance_task(username: str, password: str) -> Dict[str, Any
         # If we auto-discovered batchClassIds, add a helpful suggestion to the result
         if getattr(used_scraper, "_pr_suggestion", None):
             result["suggestions"] = [used_scraper._pr_suggestion]
+            # Also include the structured list of discovered batch IDs so the frontend
+            # can present them interactively to the user (choose/default leftmost)
+            if getattr(used_scraper, "_auto_discovered_batch_ids", None):
+                result["discovered_batch_ids"] = [
+                    str(x) for x in used_scraper._auto_discovered_batch_ids
+                ]
             try:
                 app_logger.info(f"Suggestion for user: {used_scraper._pr_suggestion}")
             except Exception:
@@ -1020,6 +1057,7 @@ app = FastAPI(
     description="Fetch and analyze student attendance data from PESUAcademy",
     version="1.0.0",
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 router = APIRouter()
 
 
@@ -1038,6 +1076,7 @@ async def get_attendance(request: dict = Body(...)) -> dict:
         # Process attendance data
         username = request.get("username")
         password = request.get("password")
+        batch_id = request.get("batch_id")
         if not username or not password:
             response, status_code = APIResponse.error(
                 error_type="ValidationError",
@@ -1047,7 +1086,7 @@ async def get_attendance(request: dict = Body(...)) -> dict:
             )
             raise HTTPException(status_code=status_code, detail=response)
 
-        result = await process_attendance_task(username, password)
+        result = await process_attendance_task(username, password, batch_id)
 
         return APIResponse.success(
             data=result,
@@ -1091,6 +1130,46 @@ async def get_attendance(request: dict = Body(...)) -> dict:
             error_type="UnexpectedError",
             details=str(error),
             code="internal_error",
+            status_code=500,
+        )
+        raise HTTPException(status_code=status_code, detail=response)
+
+
+@router.post("/semesters", include_in_schema=True)
+async def get_semesters(request: dict = Body(...)) -> dict:
+    try:
+        username = request.get("username")
+        password = request.get("password")
+        if not username or not password:
+            response, status_code = APIResponse.error(
+                error_type="ValidationError",
+                details="username and password are required",
+                code="missing_credentials",
+                status_code=400,
+            )
+            raise HTTPException(status_code=status_code, detail=response)
+
+        # Create scraper and login to get semesters
+        scraper = PESUAttendanceScraper(username, password)
+        try:
+            scraper.login()
+            batch_ids, texts = scraper._fetch_semester_batch_ids(
+                scraper._prepare_profile_context()
+            )
+            return APIResponse.success(
+                data={"semesters": texts},
+                code="semesters_retrieved",
+                message=f"Available semesters retrieved for {username}",
+            )
+        finally:
+            scraper.logout()
+
+    except Exception as e:
+        app_logger.error(f"Error fetching semesters for {username}: {e}")
+        response, status_code = APIResponse.error(
+            error_type="SemesterError",
+            details=str(e),
+            code="semesters_failed",
             status_code=500,
         )
         raise HTTPException(status_code=status_code, detail=response)
@@ -1168,7 +1247,72 @@ else:
         return JSONResponse(content=response_payload, status_code=status_code)
 
 
+def bundle_assets():
+    """Bundle frontend JS and CSS assets."""
+    repo_root = Path(__file__).resolve().parent
+    web_dir = repo_root / "frontend" / "web"
+
+    # Rebuild JS bundle (exclude legacy analytics file)
+    js_files = ["chart.min.js", "script.js"]
+    app_logger.info("Bundling %s", " ".join(js_files))
+    bundle_path = web_dir / "bundle.min.js"
+    if bundle_path.exists():
+        bundle_path.unlink()
+    bundle = ""
+    for file in js_files:
+        with open(web_dir / file, "r", encoding="utf-8") as f:
+            content = f.read()
+            # Remove source map comments
+            lines = content.splitlines()
+            lines = [
+                line
+                for line in lines
+                if not line.strip().startswith("//# sourceMappingURL")
+            ]
+            bundle += "\n".join(lines) + "\n"
+    with open(bundle_path, "w", encoding="utf-8") as f:
+        f.write(bundle)
+    app_logger.info("Frontend JS assets bundled successfully: %s", bundle_path)
+
+    # Minify CSS (write style.min.css). Uses rcssmin when available, falls back to a simple stripper.
+    css_src = web_dir / "style.css"
+    css_min_path = web_dir / "style.min.css"
+    if css_src.exists():
+        try:
+            try:
+                import rcssmin
+
+                minified = rcssmin.cssmin(css_src.read_text(encoding="utf-8"))
+            except Exception:
+                # Fallback: remove block comments and collapse whitespace
+                content = css_src.read_text(encoding="utf-8")
+                minified = re.sub(r"/\*.*?\*/", "", content, flags=re.S)
+                minified = re.sub(r"\s+", " ", minified).strip()
+
+            with open(css_min_path, "w", encoding="utf-8") as f:
+                f.write(minified)
+            app_logger.info("Minified CSS written to %s", css_min_path)
+        except Exception as e:
+            app_logger.warning("Failed to minify CSS: %s", e)
+    else:
+        app_logger.warning("CSS source file not found at: %s", css_src)
+
+
 if __name__ == "__main__":
+    # Always update VERSION and bundle at startup
+    import subprocess
+    commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode().strip()
+    sw_path = Path(__file__).resolve().parent / "frontend" / "web" / "sw.js"
+    content = sw_path.read_text()
+    content = re.sub(r"const VERSION = 'v0\.7\.0';", f"const VERSION = 'v0.7.0-{commit_hash}';", content)
+    sw_path.write_text(content)
+    print(f'Updated VERSION in sw.js to v0.7.0-{commit_hash}')
+    bundle_assets()
+
+    # Exit if in Vercel build environment
+    if os.getenv('VERCEL'):
+        sys.exit(0)
+
     # Optionally start the Telegram bot as a separate subprocess.
     # Set ENABLE_BACKEND_TELEGRAM=1 (or true) in the environment to enable.
     bot_proc = None

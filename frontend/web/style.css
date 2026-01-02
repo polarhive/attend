@@ -7,7 +7,7 @@
     --success: #22c55e;
     --warning: #facc15;
     --danger: #ef4444;
-    
+
     /* Dark Theme */
     --bg-primary: #0a0a0a;
     --bg-secondary: #111111;
@@ -17,7 +17,7 @@
     --text-secondary: #d4d4d8;
     --text-tertiary: #a1a1aa;
     --border: #27272a;
-    
+
     /* Spacing */
     --space-1: 0.25rem;
     --space-2: 0.5rem;
@@ -28,13 +28,13 @@
     --space-8: 2rem;
     --space-10: 2.5rem;
     --space-12: 3rem;
-    
+
     /* Border Radius */
     --radius-sm: 0.25rem;
     --radius-md: 0.375rem;
     --radius-lg: 0.5rem;
     --radius-xl: 0.75rem;
-    
+
     /* Transitions */
     --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
@@ -92,7 +92,8 @@ body {
 /* Allow flex children to shrink and prevent overflow */
 .navbar-brand,
 .navbar-controls {
-    min-width: 0; /* allow flex children to shrink */
+    min-width: 0;
+    /* allow flex children to shrink */
 }
 
 .threshold-control {
@@ -225,6 +226,7 @@ body {
     box-shadow: none;
     margin-top: -4px;
 }
+
 .navbar .threshold-control input[type="range"]::-moz-range-thumb {
     width: 14px;
     height: 14px;
@@ -355,9 +357,9 @@ body {
     gap: 1rem;
     padding: 0.6rem 0.9rem;
     border-radius: var(--radius-md);
-    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
     border: 1px solid var(--border);
-    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
     font-size: 0.92rem;
 }
 
@@ -365,7 +367,8 @@ body {
     color: var(--text-secondary);
     display: flex;
     gap: 0.75rem;
-    justify-content: center; /* center horizontally */
+    justify-content: center;
+    /* center horizontally */
 }
 
 .info-bar-text strong {
@@ -470,6 +473,78 @@ body {
     color: var(--text-tertiary);
 }
 
+.form-group {
+    position: relative;
+}
+
+.form-group select {
+    width: 100%;
+    padding: var(--space-4);
+    padding-right: 3.5rem;
+    /* room for custom arrow */
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-size: 1rem;
+    color: var(--text-primary);
+    transition: var(--transition-fast);
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+}
+
+.form-group select:focus {
+    border-color: #3a3a3e;
+    background: var(--bg-tertiary);
+}
+
+.form-group select option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+/* Custom arrow pseudo-element to avoid overflow — default hidden for broad compatibility */
+.form-group::after {
+    display: none;
+    /* default: hidden for browsers without :has support */
+    content: "";
+    position: absolute;
+    pointer-events: none;
+    right: calc(var(--space-3));
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1rem;
+    height: 1rem;
+    background-repeat: no-repeat;
+    background-size: 1rem;
+}
+
+.select-wrap {
+    position: relative;
+    display: block;
+}
+
+.select-wrap::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+    right: calc(var(--space-3));
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1rem;
+    height: 1rem;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-size: 1rem;
+}
+
+/* Hide IE/Edge default dropdown arrow */
+.form-group select::-ms-expand {
+    display: none;
+}
+
 /* Button Styles */
 .btn-primary {
     width: 100%;
@@ -486,6 +561,38 @@ body {
     font-weight: 600;
     cursor: pointer;
     transition: var(--transition-fast);
+    position: relative;
+    /* for spinner */
+}
+
+/* Loading state visual + spinner */
+.btn-primary.loading {
+    opacity: 0.95;
+    pointer-events: none;
+}
+
+.btn-primary.loading::after {
+    content: "";
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    border-top-color: #fff;
+    border-radius: 50%;
+    position: absolute;
+    right: 1.25rem;
+    top: 50%;
+    transform: translateY(-50%);
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: translateY(-50%) rotate(0deg);
+    }
+
+    to {
+        transform: translateY(-50%) rotate(360deg);
+    }
 }
 
 .btn-primary:hover {
@@ -538,6 +645,7 @@ body {
         opacity: 0;
         transform: translateY(16px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -551,10 +659,10 @@ input[type="range"] {
     width: 100%;
     height: 6px;
     border-radius: var(--radius-full);
-    background: linear-gradient(to right, 
-        var(--danger) 0%, 
-        var(--warning) 50%, 
-        var(--success) 100%);
+    background: linear-gradient(to right,
+            var(--danger) 0%,
+            var(--warning) 50%,
+            var(--success) 100%);
     outline: none;
     cursor: pointer;
 }
@@ -795,6 +903,7 @@ table tbody tr:last-child td:last-child {
         transform: translateY(100px);
         opacity: 0;
     }
+
     to {
         transform: translateY(0);
         opacity: 1;
@@ -837,6 +946,7 @@ table tbody tr:last-child td:last-child {
         opacity: 0;
         transform: translateX(400px);
     }
+
     to {
         opacity: 1;
         transform: translateX(0);
@@ -848,6 +958,7 @@ table tbody tr:last-child td:last-child {
         opacity: 1;
         transform: translateX(0);
     }
+
     to {
         opacity: 0;
         transform: translateX(400px);
@@ -885,17 +996,39 @@ table tbody tr:last-child td:last-child {
     animation: skeleton-pulse 2s ease-in-out infinite;
 }
 
-.skeleton-bar:nth-child(1) { height: 65%; animation-delay: 0s; }
-.skeleton-bar:nth-child(2) { height: 58%; animation-delay: 0.2s; }
-.skeleton-bar:nth-child(3) { height: 55%; animation-delay: 0.4s; }
-.skeleton-bar:nth-child(4) { height: 75%; animation-delay: 0.6s; }
-.skeleton-bar:nth-child(5) { height: 82%; animation-delay: 0.8s; }
+.skeleton-bar:nth-child(1) {
+    height: 65%;
+    animation-delay: 0s;
+}
+
+.skeleton-bar:nth-child(2) {
+    height: 58%;
+    animation-delay: 0.2s;
+}
+
+.skeleton-bar:nth-child(3) {
+    height: 55%;
+    animation-delay: 0.4s;
+}
+
+.skeleton-bar:nth-child(4) {
+    height: 75%;
+    animation-delay: 0.6s;
+}
+
+.skeleton-bar:nth-child(5) {
+    height: 82%;
+    animation-delay: 0.8s;
+}
 
 @keyframes skeleton-pulse {
-    0%, 100% {
+
+    0%,
+    100% {
         opacity: 0.4;
         border-color: var(--border);
     }
+
     50% {
         opacity: 0.8;
         border-color: var(--text-tertiary);
@@ -942,11 +1075,25 @@ table tbody tr:last-child td:last-child {
     animation: skeleton-pulse 2s ease-in-out infinite;
 }
 
-.skeleton-table-row:nth-child(1) .skeleton-table-cell { animation-delay: 0.1s; }
-.skeleton-table-row:nth-child(2) .skeleton-table-cell { animation-delay: 0.2s; }
-.skeleton-table-row:nth-child(3) .skeleton-table-cell { animation-delay: 0.3s; }
-.skeleton-table-row:nth-child(4) .skeleton-table-cell { animation-delay: 0.4s; }
-.skeleton-table-row:nth-child(5) .skeleton-table-cell { animation-delay: 0.5s; }
+.skeleton-table-row:nth-child(1) .skeleton-table-cell {
+    animation-delay: 0.1s;
+}
+
+.skeleton-table-row:nth-child(2) .skeleton-table-cell {
+    animation-delay: 0.2s;
+}
+
+.skeleton-table-row:nth-child(3) .skeleton-table-cell {
+    animation-delay: 0.3s;
+}
+
+.skeleton-table-row:nth-child(4) .skeleton-table-cell {
+    animation-delay: 0.4s;
+}
+
+.skeleton-table-row:nth-child(5) .skeleton-table-cell {
+    animation-delay: 0.5s;
+}
 
 /* Loading Animation */
 .loading-container {
@@ -986,6 +1133,7 @@ table tbody tr:last-child td:last-child {
         opacity: 0;
         transform: translateX(-4px);
     }
+
     to {
         opacity: 1;
         transform: translateX(0);
@@ -1029,6 +1177,7 @@ table tbody tr:last-child td:last-child {
     0% {
         left: -30%;
     }
+
     100% {
         left: 100%;
     }
@@ -1160,9 +1309,11 @@ body.loading .loading-container {
 
 /* Make navbar threshold pill scale with desktop header (bigger label, thicker track, larger thumb) */
 @media (min-width: 500px) {
+
     /* On desktop, center the navbar title while keeping left/right controls in flow */
     .navbar {
-        position: relative; /* ensure absolute children are positioned relative to navbar */
+        position: relative;
+        /* ensure absolute children are positioned relative to navbar */
     }
 
     #navbar-title {
@@ -1171,15 +1322,18 @@ body.loading .loading-container {
         top: 50%;
         transform: translate(-50%, -50%);
         margin: 0;
-        pointer-events: none; /* allow clicks to pass through to controls if overlapping */
+        pointer-events: none;
+        /* allow clicks to pass through to controls if overlapping */
         text-align: center;
-        max-width: calc(100% - 320px); /* leave space for left & right controls */
+        max-width: calc(100% - 320px);
+        /* leave space for left & right controls */
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         display: inline-block;
         max-width: 28ch;
     }
+
     .threshold-control {
         padding: 10px 18px;
         border-radius: 56px;
@@ -1215,8 +1369,9 @@ body.loading .loading-container {
         border-radius: 50%;
         background: white;
         border: 3px solid var(--primary);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.35);
-        margin-top: -6px; /* visually center thumb relative to taller track */
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+        margin-top: -6px;
+        /* visually center thumb relative to taller track */
     }
 
     .threshold-control input[type="range"]::-moz-range-thumb {
@@ -1225,7 +1380,7 @@ body.loading .loading-container {
         border-radius: 50%;
         background: white;
         border: 3px solid var(--primary);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
     }
 
     .threshold-control input[type="range"]::-webkit-slider-runnable-track {
@@ -1263,13 +1418,13 @@ body.loading .loading-container {
         height: 300px;
         padding: var(--space-3);
     }
-    
+
     .skeleton-chart-container {
         height: 300px;
         padding: var(--space-4);
         gap: var(--space-3);
     }
-    
+
     .table-container {
         margin: 0 -0.25rem;
         border-radius: var(--radius-sm);
@@ -1317,7 +1472,7 @@ body.loading .loading-container {
         padding: 0.3rem 0.25rem !important;
         font-size: 0.7rem !important;
     }
-    
+
     table th:first-child,
     table td:first-child {
         padding-left: 0.4rem !important;
@@ -1327,24 +1482,24 @@ body.loading .loading-container {
         white-space: nowrap !important;
         font-size: 0.65rem !important;
     }
-    
+
     table th:last-child,
     table td:last-child {
         padding-right: 0.4rem !important;
     }
-    
+
     /* Make buffer column more compact */
     .skippable-cell {
         font-size: 0.65rem !important;
         padding: 0.2rem 0.15rem !important;
     }
-    
+
     .skippable-skip,
     .skippable-need {
         font-size: 0.65rem !important;
         padding: 0.15rem 0.25rem !important;
     }
-    
+
     /* Make percentage column narrower */
     .percentage-cell {
         font-size: 0.7rem !important;
@@ -1390,13 +1545,16 @@ body.loading .loading-container {
     font-weight: 500;
     text-align: center;
     transition: var(--transition-fast);
-    appearance: textfield; /* Remove spinner */
-    -moz-appearance: textfield; /* Remove spinner in Firefox */
+    appearance: textfield;
+    /* Remove spinner */
+    -moz-appearance: textfield;
+    /* Remove spinner in Firefox */
 }
 
 .attendance-input::-webkit-outer-spin-button,
 .attendance-input::-webkit-inner-spin-button {
-    -webkit-appearance: none; /* Remove spinner in Chrome/Safari */
+    -webkit-appearance: none;
+    /* Remove spinner in Chrome/Safari */
     margin: 0;
 }
 
@@ -1485,7 +1643,7 @@ body.loading .loading-container {
     .control-btn.decrement {
         font-size: 0.875rem;
     }
-    
+
     .input-control {
         gap: 0.15rem;
     }
@@ -1493,6 +1651,7 @@ body.loading .loading-container {
 
 /* Print Styles */
 @media print {
+
     .navbar,
     .form-wrapper,
     .loading-container,
@@ -1505,16 +1664,16 @@ body.loading .loading-container {
     .result {
         margin-top: 0;
     }
-    
+
     /* Print actual values, not inputs */
     .input-control {
         display: block;
     }
-    
+
     .control-btn {
         display: none !important;
     }
-    
+
     .attendance-input {
         border: none;
         background: transparent;
