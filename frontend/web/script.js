@@ -1,4 +1,30 @@
 // This script builds the DOM structure and contains the main application logic for the Attend web app.
+
+// Version check for cache busting
+async function checkVersion() {
+    try {
+        const response = await fetch(`/sw.js?v=${Date.now()}`, { cache: 'no-cache' });
+        const text = await response.text();
+        const match = text.match(/const CACHE_NAME = 'attendance-tracker-' \+ '([^']+)';/);
+        if (match) {
+            const currentVersion = match[1];
+            const storedVersion = Cookies.get('app_version');
+            if (storedVersion !== currentVersion) {
+                // Notify user
+                alert('App updated! Logging out.');
+                // Clear all cookies
+                Cookies.deleteAll();
+                // Set new version
+                Cookies.set('app_version', currentVersion, 365);
+                // Reload
+                window.location.reload();
+            }
+        }
+    } catch (e) {
+        console.warn('Version check failed:', e);
+    }
+}
+
 function buildStaticDOM() {
     // Background gradients
     const bg1 = document.createElement('div');
@@ -123,6 +149,7 @@ function buildStaticDOM() {
 }
 
 // Build the DOM immediately
+checkVersion();
 buildStaticDOM();
 
 // DOM Elements (now available)

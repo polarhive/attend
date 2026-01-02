@@ -1299,19 +1299,65 @@ def bundle_assets():
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--bundle",
+        action="store_true",
+        help="Update CACHE_NAME in sw.js with commit hash and bundle assets",
+    )
+    args = parser.parse_args()
+
+    if args.bundle:
+        # Get commit hash
+        commit_hash = os.getenv("VERCEL_GIT_COMMIT_SHA")
+        if commit_hash:
+            commit_hash = commit_hash[:7]  # Short hash
+        else:
+            import subprocess
+
+            commit_hash = (
+                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
+                .decode()
+                .strip()
+            )
+        # Update sw.js
+        sw_path = Path(__file__).resolve().parent / "frontend" / "web" / "sw.js"
+        content = sw_path.read_text()
+        content = re.sub(
+            r"const CACHE_NAME = 'attendance-tracker-' \+ '.*';",
+            f"const CACHE_NAME = 'attendance-tracker-' + '{commit_hash}';",
+            content,
+        )
+        sw_path.write_text(content)
+        print(f"Updated CACHE_NAME in sw.js to attendance-tracker-{commit_hash}")
+        # Then bundle
+        bundle_assets()
+        sys.exit(0)
+
     # Always update VERSION and bundle at startup
-    import subprocess
-    commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode().strip()
+    commit_hash = os.getenv("VERCEL_GIT_COMMIT_SHA")
+    if commit_hash:
+        commit_hash = commit_hash[:7]  # Short hash
+    else:
+        import subprocess
+
+        commit_hash = (
+            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
+            .decode()
+            .strip()
+        )
     sw_path = Path(__file__).resolve().parent / "frontend" / "web" / "sw.js"
     content = sw_path.read_text()
-    content = re.sub(r"const VERSION = 'v0\.7\.0';", f"const VERSION = 'v0.7.0-{commit_hash}';", content)
+    content = re.sub(
+        r"const CACHE_NAME = 'attendance-tracker-' \+ '.*';",
+        f"const CACHE_NAME = 'attendance-tracker-' + '{commit_hash}';",
+        content,
+    )
     sw_path.write_text(content)
-    print(f'Updated VERSION in sw.js to v0.7.0-{commit_hash}')
+    print(f"Updated CACHE_NAME in sw.js to attendance-tracker-{commit_hash}")
     bundle_assets()
-
-    # Exit if in Vercel build environment
-    if os.getenv('VERCEL'):
-        sys.exit(0)
 
     # Optionally start the Telegram bot as a separate subprocess.
     # Set ENABLE_BACKEND_TELEGRAM=1 (or true) in the environment to enable.
