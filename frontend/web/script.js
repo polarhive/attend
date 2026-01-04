@@ -36,6 +36,20 @@ const THRESHOLD_HTML = `
 
 const SKELETON_HTML = `<div class="skeleton skeleton-chart"></div><div class="skeleton skeleton-table"></div>`;
 
+// Centralized key names for app-level storage
+const APP_KEYS = {
+    CREDENTIALS: 'credentials',
+    THRESHOLD: 'app.threshold',
+    VERSION: 'app.version'
+};
+
+const Storage = {
+    set: (name, value) => { localStorage.setItem(name, value); },
+    get: (name) => { return localStorage.getItem(name); },
+    delete: (name) => { localStorage.removeItem(name); },
+    deleteAll: () => { Storage.delete(APP_KEYS.CREDENTIALS); Storage.delete(APP_KEYS.THRESHOLD); Storage.delete(APP_KEYS.VERSION); }
+};
+
 // Version check for cache busting
 async function checkVersion() {
     try {
@@ -45,20 +59,19 @@ async function checkVersion() {
         if (match) {
             const currentVersion = match[1];
             logEvent('version.info', { version: currentVersion });
-            const storedVersion = Cookies.get('app_version');
+            const storedVersion = Storage.get(APP_KEYS.VERSION);
             if (storedVersion !== currentVersion) {
                 // Prefer a non-modal in-page notification instead of alert.
-                const hadCookies = Boolean(Cookies.get('srn') || Cookies.get('password') || Cookies.get('batch_id'));
-                if (hadCookies) {
+                const hadStoredData = Boolean(Storage.get('credentials'));
+                if (hadStoredData) {
                     showNotification('App updated! Logging out.', 'info', 3500);
-                    // Clear all cookies to ensure we start fresh
-                    Cookies.deleteAll();
+                    Storage.deleteAll();
                 } else {
                     showNotification('App updated! Refreshing.', 'info', 2500);
                 }
                 logEvent('sw.update_available', {}, 'info');
                 // Remember new version and reload after a short delay so notification is visible
-                Cookies.set('app_version', currentVersion, 365);
+                Storage.set(APP_KEYS.VERSION, currentVersion);
                 setTimeout(() => window.location.reload(), 600);
             }
         }
@@ -884,7 +897,15 @@ function getSkippableHtml(skippable) {
     }
 }
 
-function handleThresholdChange(e) { updateThreshold(parseInt(e.target.value)); }
+// Debounce helper for reducing expensive updates
+function debounce(fn, wait) {
+    let timer = null;
+    return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), wait); };
+}
+
+const debouncedUpdateThreshold = debounce(updateThreshold, 120);
+
+function handleThresholdChange(e) { debouncedUpdateThreshold(parseInt(e.target.value)); }
 
 function updateUIForLoggedInState() {
     const isLoggedIn = Auth.isLoggedIn();
@@ -895,7 +916,7 @@ function updateUIForLoggedInState() {
     const githubLink = document.getElementById('github-link');
     if (githubLink) { githubLink.style.display = isLoggedIn ? 'none' : 'inline-flex'; }
     const howBox = document.getElementById('how-it-works');
-    if (howBox) { const hasSavedData = Cookies.get('srn') || Cookies.get('password') || Cookies.get('threshold'); howBox.style.display = (isLoggedIn || hasSavedData) ? 'none' : 'block'; }
+    if (howBox) { const hasSavedData = Storage.get(APP_KEYS.CREDENTIALS) || Storage.get(APP_KEYS.THRESHOLD); howBox.style.display = (isLoggedIn || hasSavedData) ? 'none' : 'block'; }
     if (!isLoggedIn) { resultDiv.innerHTML = ''; }
 
     // If the form is hidden (no login fields visible) and we don't already have results
@@ -912,20 +933,14 @@ function updateUIForLoggedInState() {
     }
 }
 
-const Cookies = {
-    set: (name, value, days) => { const date = new Date(); date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000)); document.cookie = `${name}=${value};expires=${date.toUTCString()};path=/`; },
-    get: (name) => { const value = `; ${document.cookie}`; const parts = value.split(`; ${name}=`); if (parts.length === 2) return parts.pop().split(';').shift(); return null; },
-    delete: (name) => { document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`; },
-    deleteAll: () => { const cookies = document.cookie.split(";"); for (let cookie of cookies) { const eqPos = cookie.indexOf("="); const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim(); if (name) { Cookies.delete(name); } } }
-};
 
-const ThresholdManager = { getThreshold: () => { const saved = Cookies.get('threshold'); return saved ? parseInt(saved) : 75; }, saveThreshold: (threshold) => { Cookies.set('threshold', threshold.toString(), 365); } };
+const ThresholdManager = { getThreshold: () => { const saved = Storage.get(APP_KEYS.THRESHOLD); return saved ? parseInt(saved) : 75; }, saveThreshold: (threshold) => { Storage.set(APP_KEYS.THRESHOLD, threshold.toString()); } };
 
 const Auth = {
     credentials: { srn: null, password: null, batch_id: null },
-    loadFromCookies: () => { const srn = Cookies.get('srn'); const password = Cookies.get('password'); const batch_id = Cookies.get('batch_id'); if (srn && password) { Auth.credentials.srn = srn; Auth.credentials.password = password; Auth.credentials.batch_id = batch_id; return true; } return false; },
-    save: (srn, password, batch_id = null) => { Auth.credentials.srn = srn.toUpperCase(); Auth.credentials.password = password; Auth.credentials.batch_id = batch_id; Cookies.set('srn', srn.toUpperCase(), 365); Cookies.set('password', password, 365); if (batch_id) Cookies.set('batch_id', batch_id, 365); },
-    clear: () => { Auth.credentials.srn = null; Auth.credentials.password = null; Auth.credentials.batch_id = null; Cookies.delete('srn'); Cookies.delete('password'); Cookies.delete('batch_id'); Cookies.delete('threshold'); },
+    loadFromStorage: () => { const raw = Storage.get('credentials'); if (!raw) return false; try { const obj = JSON.parse(raw); const srn = obj.srn; const password = obj.password; const batch_id = obj.batch_id || null; if (srn && password) { Auth.credentials.srn = srn; Auth.credentials.password = password; Auth.credentials.batch_id = batch_id; return true; } } catch (e) { console.warn('Failed to parse stored credentials:', e); } return false; },
+    save: (srn, password, batch_id = null) => { Auth.credentials.srn = srn.toUpperCase(); Auth.credentials.password = password; Auth.credentials.batch_id = batch_id; const obj = { srn: srn.toUpperCase(), password: password, batch_id: batch_id }; Storage.set('credentials', JSON.stringify(obj)); },
+    clear: () => { Auth.credentials.srn = null; Auth.credentials.password = null; Auth.credentials.batch_id = null; Storage.delete(APP_KEYS.CREDENTIALS); Storage.delete(APP_KEYS.THRESHOLD); },
     isLoggedIn: () => { return Boolean(Auth.credentials.srn && Auth.credentials.password); }
 };
 
@@ -1001,7 +1016,7 @@ async function fetchAttendance(srn, password, batchId = null) {
     }
 }
 
-function logout() { Auth.clear(); Cookies.deleteAll(); location.reload(); }
+function logout() { Auth.clear(); Storage.deleteAll(); location.reload(); }
 
 function cleanUrlParameters() { if (window.location.search) { const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname; window.history.replaceState({}, document.title, cleanUrl); } }
 
@@ -1100,7 +1115,8 @@ const thresholdSlider = document.getElementById('threshold-slider');
 if (thresholdSlider) { thresholdSlider.addEventListener('input', handleThresholdChange); }
 
 (function initializeApp() {
-    const hasSavedCredentials = document.cookie.includes('srn=') && document.cookie.includes('password=');
+    // Try loading and validating stored credentials immediately so we can hide UI early if valid
+    const hasSavedCredentials = Auth.loadFromStorage();
     if (hasSavedCredentials) {
         setLoadingState(true);
         document.addEventListener('DOMContentLoaded', () => {
@@ -1113,8 +1129,7 @@ if (thresholdSlider) { thresholdSlider.addEventListener('input', handleThreshold
 
     window.addEventListener('load', async () => {
         cleanUrlParameters();
-        if (hasSavedCredentials && Auth.loadFromCookies()) {
-            // Auto-login flow: fade out the form, show loader, fetch, then show results
+        if (hasSavedCredentials) {
             updateUIForLoggedInState();
             const formWrapper = document.querySelector('.form-wrapper');
             try {
