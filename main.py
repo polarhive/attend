@@ -274,9 +274,6 @@ class PESUAttendanceScraper:
             self._auto_discovered_batch_ids: Optional[List[int]] = None
             self.sem_texts: Optional[Dict[int, str]] = None
 
-            # Store CSRF token to reuse
-            self.csrf_token: Optional[str] = None
-
             # Extract branch prefix from username for logging
             # Derive a human-friendly branch prefix for logging
             self.branch_prefix = username[:10]
@@ -285,52 +282,184 @@ class PESUAttendanceScraper:
             raise ConfigurationError(f"Configuration error: {e}")
 
     def _extract_csrf_token(self, html_content: str) -> str:
+        """
+        Extract CSRF token from several possible locations:
+        - <input name="_csrf" value="...">
+        - <meta name="_csrf" content="..."> or common meta tokens
+        - inline JS patterns or UUID-like tokens
+        """
         soup = BeautifulSoup(html_content, "html.parser")
+
+        # 1) standard hidden input
         csrf_input = soup.find("input", {"name": "_csrf"})
+        if csrf_input and csrf_input.get("value"):
+            return csrf_input.get("value")  # type: ignore
 
-        if not csrf_input or not csrf_input.get("value"):  # type: ignore
-            raise AuthenticationError("CSRF token not found in response")
+        # 2) meta tags
+        for meta_name in ("_csrf", "csrf-token", "csrf"):
+            m = soup.find("meta", {"name": meta_name})
+            if m and m.get("content"):
+                return m.get("content")  # type: ignore
 
-        return csrf_input.get("value")  # type: ignore
+        # 3) JS inline assignment e.g. _csrf = 'uuid' or "_csrf":"uuid"
+        m = re.search(
+            r"_csrf['\"]?\s*[:=]\s*['\"]([0-9a-fA-F-]{8,})['\"]", html_content
+        )
+        if m:
+            return m.group(1)
+
+        # 4) fallback: any UUID in page (common CSRF format observed)
+        m2 = re.search(
+            r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+            html_content,
+            re.I,
+        )
+        if m2:
+            return m2.group(1)
+
+        raise AuthenticationError("CSRF token not found in response")
 
     def login(self) -> None:
         app_log("auth.initiate", "Initiating authentication process")
 
         try:
-            # Get login page and extract CSRF token
+            # GET initial page (login landing) and gather cookies + form
             login_page_url = f"{self.BASE_URL}/"
-            response = self.session.get(login_page_url)
-            response.raise_for_status()
+            r0 = self.session.get(login_page_url, allow_redirects=True, timeout=15)
+            r0.raise_for_status()
 
-            csrf_token = self._extract_csrf_token(response.text)
+            soup = BeautifulSoup(r0.text, "html.parser")
+            # Find the login form (heuristic: form containing j_username or username field)
+            form = None
+            for f in soup.find_all("form"):
+                if f.find("input", {"name": "j_username"}) or f.find(
+                    "input", {"name": "username"}
+                ):
+                    form = f
+                    break
 
-            # Prepare and submit login credentials
-            login_url = f"{self.BASE_URL}/j_spring_security_check"
+            action = None
+            if form and form.get("action"):
+                action = form.get("action")
+            else:
+                action = "/j_spring_security_check"
+
+            if action.startswith("http"):
+                login_url = action
+            else:
+                login_url = urljoin(self.BASE_URL + "/", action.lstrip("/"))
+
+            # Gather form hidden inputs (preserve any extra required fields)
+            form_inputs = {}
+            if form:
+                for inp in form.find_all("input"):
+                    name = inp.get("name")
+                    if not name:
+                        continue
+                    if name in ("j_username", "j_password"):
+                        continue
+                    form_inputs[name] = inp.get("value", "")
+
+            # Determine CSRF to use for login (form value > page token > cookie > existing)
+            form_csrf = form_inputs.get("_csrf")
+            page_csrf = None
+            try:
+                page_csrf = self._extract_csrf_token(r0.text)
+            except AuthenticationError:
+                page_csrf = None
+
+            if form_csrf:
+                csrf_token = form_csrf
+                csrf_source = "form"
+            elif page_csrf:
+                csrf_token = page_csrf
+                csrf_source = "html"
+            else:
+                # cookie-based fallback
+                csrf_token = self.session.cookies.get(
+                    "XSRF-TOKEN"
+                ) or self.session.cookies.get("CSRF-TOKEN")
+                csrf_source = "cookie" if csrf_token else None
+
+            if not csrf_token:
+                raise AuthenticationError(
+                    "Missing CSRF token (no form, html token or cookie)"
+                )
+
             login_payload = {
+                **form_inputs,
+                "_csrf": csrf_token,
                 "j_username": self.username,
                 "j_password": self.password,
-                "_csrf": csrf_token,
             }
 
-            login_response = self.session.post(login_url, data=login_payload)
-            login_response.raise_for_status()
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": "https://www.pesuacademy.com",
+                "Referer": r0.url,
+                "Sec-GPC": "1",
+            }
 
-            # Validate successful authentication
-            self._validate_authentication()
+            app_logger.debug(f"Posting to {login_url} with csrf source={csrf_source}")
+            resp = self.session.post(
+                login_url,
+                data=login_payload,
+                headers=headers,
+                allow_redirects=True,
+                timeout=15,
+            )
+
+            app_logger.debug(
+                f"Login POST status={getattr(resp, 'status_code', None)} url={getattr(resp, 'url', None)}"
+            )
+            app_logger.debug(
+                f"Session cookies after login: {self.session.cookies.get_dict()}"
+            )
+
+            # Heuristic: server sometimes redirects to http landing (which returns 404); if final url uses http, try https equivalent
+            final_resp = resp
+            try:
+                if getattr(resp, "url", "").startswith("http://"):
+                    alt = "https://" + resp.url.split("://", 1)[1]
+                    app_logger.debug(f"Retrying landing URL with https: {alt}")
+                    landing_resp = self.session.get(
+                        alt, allow_redirects=True, timeout=15
+                    )
+                    app_logger.debug(
+                        f"Landing fetch status: {getattr(landing_resp, 'status_code', None)} url={getattr(landing_resp, 'url', None)}"
+                    )
+                    if landing_resp.status_code < 400:
+                        final_resp = landing_resp
+            except Exception:
+                pass
+
+            # Basic detection of failed login via presence of login form or error messages
+            final_body = (final_resp.text or "").lower()
+            if (
+                "j_username" in final_body
+                or "j_spring_security_check" in final_body
+                or ("invalid" in final_body and "login" in final_body)
+            ):
+                raise AuthenticationError(
+                    "Authentication failed: login page or error detected after POST"
+                )
+
+            # Prepare profile context and obtain a ready-to-use CSRF token (reuse final response to avoid extra GET)
+            try:
+                csrf_after = self._prepare_profile_context(initial_response=final_resp)
+            except AuthenticationError:
+                # Fall back to cookie if preparation failed
+                csrf_after = self.session.cookies.get(
+                    "XSRF-TOKEN"
+                ) or self.session.cookies.get("CSRF-TOKEN")
 
             app_log("auth.success", "Authentication successful")
 
-            # Prepare profile context and obtain a ready-to-use CSRF token
-            profile_url = f"{self.BASE_URL}/s/studentProfilePESU"
-            profile_response = self.session.get(profile_url)
-            profile_response.raise_for_status()
-            csrf_token = self._extract_csrf_token(profile_response.text)
-            self.csrf_token = csrf_token
-
             # If batch class IDs are not configured, attempt to auto-discover them
+            # from the semesters endpoint used by the profile page.
             if not self.batch_class_ids:
                 try:
-                    ids, texts = self._fetch_semester_batch_ids(csrf_token)
+                    ids, texts = self._fetch_semester_batch_ids(csrf_after)
                     if ids:
                         # Record that these were auto-discovered so the API can
                         # surface a helpful suggestion to the user.
@@ -353,18 +482,37 @@ class PESUAttendanceScraper:
 
     def _validate_authentication(self) -> None:
         profile_url = f"{self.BASE_URL}/s/studentProfilePESU"
-
         try:
-            # Check if we can access protected profile page without redirect
-            profile_response = self.session.get(profile_url, allow_redirects=False)
+            profile_response = self.session.get(
+                profile_url, allow_redirects=True, timeout=15
+            )
+            app_logger.debug(
+                f"Validate profile fetch status={profile_response.status_code} url={profile_response.url}"
+            )
 
-            # If we get a redirect, authentication failed
-            if profile_response.status_code in (302, 301):
-                redirect_location = profile_response.headers.get("Location")
-                if redirect_location:
+            if profile_response.status_code == 200:
+                body = profile_response.text.lower()
+                # Heuristics for successful login
+                if (
+                    "studentprofile" in body
+                    or "logout" in body
+                    or "/a/0" in profile_response.url
+                ):
+                    return
+                # Detect login form indicating failed auth
+                if re.search(r'name=["\']j_username["\']', body):
                     raise AuthenticationError(
-                        "Authentication failed: Invalid credentials"
+                        "Authentication failed: login form detected after login"
                     )
+                raise AuthenticationError(
+                    "Authentication failed: unexpected profile response"
+                )
+            elif profile_response.status_code in (301, 302):
+                raise AuthenticationError("Authentication failed: redirected to login")
+            else:
+                raise AuthenticationError(
+                    f"Authentication failed: HTTP {profile_response.status_code}"
+                )
 
         except requests.RequestException as e:
             raise AuthenticationError(f"Failed to validate authentication: {e}")
@@ -524,16 +672,8 @@ class PESUAttendanceScraper:
         )
 
         try:
-            # Get CSRF token, reuse if available
-            if self.csrf_token:
-                csrf_token = self.csrf_token
-            else:
-                # Get fresh CSRF token for attendance requests
-                dashboard_url = f"{self.BASE_URL}/s/studentProfilePESU"
-                dashboard_response = self.session.get(dashboard_url)
-                dashboard_response.raise_for_status()
-                csrf_token = self._extract_csrf_token(dashboard_response.text)
-                self.csrf_token = csrf_token
+            # Ensure the profile context is prepared and get a CSRF token
+            csrf_token = self._prepare_profile_context()
 
             # If batch class IDs are not configured (None/empty), attempt to fetch them
             if not self.batch_class_ids:
@@ -543,10 +683,20 @@ class PESUAttendanceScraper:
                     self._auto_discovered_batch_ids = ids
                     self.sem_texts = texts
                     self.batch_class_ids = ids if len(ids) > 1 else ids[0]
-                    app_log(
-                        "mapping.auto_discovered",
-                        f"Auto-discovered batchClassId(s) during scraping: {self.batch_class_ids}",
-                    )
+                    try:
+                        prefix = re.sub(r"\d+$", "", self.username)
+                        ids_str = ",".join(str(x) for x in ids)
+                        app_log(
+                            "mapping.auto_discovered",
+                            f"Auto-discovered batchClassId(s) during scraping: {self.batch_class_ids}",
+                        )
+                    except Exception:
+                        try:
+                            app_logger.info(
+                                f"Auto-discovered batchClassId(s) during scraping: {self.batch_class_ids}"
+                            )
+                        except Exception:
+                            pass
                 else:
                     app_logger.warning(
                         "No batchClassId configured and auto-discovery failed; cannot fetch attendance"
@@ -592,10 +742,38 @@ class PESUAttendanceScraper:
             "_csrf": csrf_token,
         }
 
-        try:
-            response = self.session.post(attendance_url, data=request_payload)
+        headers = {
+            "X-Requested-With": "XMLHttpRequest",
+            "X-CSRF-Token": csrf_token,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": f"{self.BASE_URL}/s/studentProfilePESU",
+        }
 
+        try:
+            response = self.session.post(
+                attendance_url, data=request_payload, headers=headers, timeout=15
+            )
+
+            # If we are redirected to sessionExpired or an HTTP 4xx occurs, log cookies & try https fallback
             if response.status_code != 200:
+                app_logger.debug(
+                    f"Attendance POST status={response.status_code} url={response.url}"
+                )
+                cookies = self.session.cookies.get_dict()
+                app_logger.debug(f"Session cookies: {cookies}")
+                # If server redirected to an http URL that returns 404, try https equivalent
+                try:
+                    if getattr(response, "url", "").startswith("http://"):
+                        alt = "https://" + response.url.split("://", 1)[1]
+                        app_logger.debug(f"Retrying attendance URL with https: {alt}")
+                        alt_resp = self.session.post(
+                            alt, data=request_payload, headers=headers, timeout=15
+                        )
+                        if alt_resp.status_code == 200:
+                            return self._parse_attendance_table(alt_resp.text)
+                except Exception:
+                    pass
+
                 app_logger.error(
                     f"HTTP {response.status_code} error for batch ID {batch_id}"
                 )
@@ -938,7 +1116,9 @@ async def get_semesters(request: dict = Body(...)) -> dict:
         scraper = PESUAttendanceScraper(username, password)
         try:
             scraper.login()
-            batch_ids, texts = scraper._fetch_semester_batch_ids(scraper.csrf_token)
+            batch_ids, texts = scraper._fetch_semester_batch_ids(
+                scraper._prepare_profile_context()
+            )
             return APIResponse.success(
                 data={"semesters": texts},
                 code="semesters_retrieved",
