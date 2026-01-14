@@ -1264,6 +1264,20 @@ def bundle_assets():
                 if not line.strip().startswith("//# sourceMappingURL")
             ]
             bundle += "\n".join(lines) + "\n"
+
+    # Replace build-time placeholders with environment values
+    try:
+        SKIPPABLE_THRESHOLD = os.getenv("SKIPPABLE_THRESHOLD", "80")
+        bundle = bundle.replace("%%SKIPPABLE_THRESHOLD%%", str(SKIPPABLE_THRESHOLD))
+        app_log(
+            "assets.replace_vars",
+            f"Applied SKIPPABLE_THRESHOLD={SKIPPABLE_THRESHOLD} to JS bundle",
+        )
+    except Exception as e:
+        app_log(
+            "assets.replace_vars_failed", f"Failed to apply build vars: {e}", "warning"
+        )
+
     try:
         try:
             import rjsmin

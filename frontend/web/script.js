@@ -29,9 +29,9 @@ const FORM_HTML = `
 const THRESHOLD_HTML = `
     <label for="threshold-slider">
         <span class="threshold-label">Min:</span>
-        <span id="threshold-display" class="threshold-value">75%</span>
+        <span id="threshold-display" class="threshold-value">%%SKIPPABLE_THRESHOLD%%%</span>
     </label>
-    <input type="range" id="threshold-slider" min="50" max="100" value="75" step="1">
+    <input type="range" id="threshold-slider" min="50" max="100" value="%%SKIPPABLE_THRESHOLD%%" step="1">
 `;
 
 const SKELETON_HTML = `<div class="skeleton skeleton-chart"></div><div class="skeleton skeleton-table"></div>`;
@@ -619,7 +619,7 @@ function generateAttendanceChart(attendanceData, customThreshold = null) {
     const attendedData = attendanceData.map(item => item.attended);
     const skippedData = attendanceData.map(item => item.skipped);
     const totalData = attendanceData.map(item => item.total);
-    const threshold = customThreshold !== null ? customThreshold : (attendanceData[0]?.threshold || 75);
+    const threshold = customThreshold !== null ? customThreshold : (attendanceData[0]?.threshold || 80);
     const thresholdData = totalData.map(total => Math.ceil((threshold / 100) * total));
     window.attendanceChart = new Chart(ctx, {
         type: 'bar',
@@ -934,7 +934,7 @@ function updateUIForLoggedInState() {
 }
 
 
-const ThresholdManager = { getThreshold: () => { const saved = Storage.get(APP_KEYS.THRESHOLD); return saved ? parseInt(saved) : 75; }, saveThreshold: (threshold) => { Storage.set(APP_KEYS.THRESHOLD, threshold.toString()); } };
+const ThresholdManager = { getThreshold: () => { const saved = Storage.get(APP_KEYS.THRESHOLD); return saved ? parseInt(saved) : (function () { const v = parseInt("%%SKIPPABLE_THRESHOLD%%", 10); return Number.isFinite(v) ? v : 80; })(); }, saveThreshold: (threshold) => { Storage.set(APP_KEYS.THRESHOLD, threshold.toString()); } };
 
 const Auth = {
     credentials: { srn: null, password: null, batch_id: null },

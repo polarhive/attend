@@ -126,17 +126,35 @@ class AttendanceAPIClient:
         """
 
         def _calc_bunkable(attended: int, total: int, threshold_pct: int) -> int:
+            """Return positive -> how many classes can be skipped while staying at/above threshold.
+            Return negative -> how many classes are NEEDED to reach threshold.
+            Zero means neither.
+            """
             if total <= 0:
                 return 0
             try:
-                if (attended / total) * 100 < threshold_pct:
-                    return 0
+                current_percentage = (attended / total) * 100
             except Exception:
                 return 0
-            max_bunk = 0
-            while (attended / (total + max_bunk)) * 100 >= threshold_pct:
-                max_bunk += 1
-            return max_bunk - 1 if max_bunk > 0 else 0
+
+            # If already at/above threshold, compute how many future classes can be skipped
+            if current_percentage >= threshold_pct:
+                try:
+                    # floor((attended * 100 / threshold) - total)
+                    return int((attended * 100) // threshold_pct - total)
+                except Exception:
+                    return max(0, int((attended * 100) / threshold_pct - total))
+
+            # Below threshold: compute how many additional attended classes are needed
+            denom = 100 - threshold_pct
+            if denom <= 0:
+                # edge case: threshold >= 100 -> make a conservative guess
+                return -(max(0, total - attended))
+            numerator = threshold_pct * total - 100 * attended
+            if numerator <= 0:
+                return 0
+            needed = (numerator + denom - 1) // denom  # ceil(numerator / denom)
+            return -int(needed)
 
         # allow optional threshold argument via api_response wrapper or default env
         threshold = (
@@ -146,9 +164,9 @@ class AttendanceAPIClient:
         )
         if threshold is None:
             try:
-                threshold = int(os.getenv("BUNKABLE_THRESHOLD", "75"))
+                threshold = int(os.getenv("SKIPPABLE_THRESHOLD", "80"))
             except Exception:
-                threshold = 75
+                threshold = 80
 
         if not api_response.get("success"):
             error_details = api_response.get("error", {}).get(
@@ -169,10 +187,17 @@ class AttendanceAPIClient:
                 attended, total = map(int, raw_data.split("/"))
                 percentage = (attended / total * 100) if total > 0 else 0
                 skippable = _calc_bunkable(attended, total, threshold)
-                message += f"• {subject}: {raw_data} ({percentage:.1f}% | Skippable: {skippable})\n"
+                if skippable > 0:
+                    skippable_text = f"Skip {skippable}"
+                elif skippable < 0:
+                    skippable_text = f"Need {abs(skippable)}"
+                else:
+                    skippable_text = "0"
+                message += (
+                    f"• {subject}: {raw_data} ({percentage:.1f}% | {skippable_text})\n"
+                )
             except (ValueError, ZeroDivisionError):
                 message += f"• {subject}: {raw_data}\n"
-
         return message
 
 
@@ -271,7 +296,7 @@ def send_attendance_report(message):
                         current_threshold = (
                             threshold_override
                             if threshold_override is not None
-                            else int(os.getenv("BUNKABLE_THRESHOLD", "75"))
+                            else int(os.getenv("SKIPPABLE_THRESHOLD", "80"))
                         )
                         subjects = []
                         attended = []
