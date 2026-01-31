@@ -84,6 +84,8 @@
         "UL25CE121A": "Constitution",
         "UL25CE121B": "Constitution",
         "UZ23UZ221A": "CIE L1",
-        "UZ23UZ221B": "CIE L2"
+        "UZ23UZ221B": "CIE L2",
+        "UZ24UZ221A": "CIE L1",
+        "UZ24UZ221B": "CIE L2"
     }
 }
