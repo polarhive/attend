@@ -1114,6 +1114,63 @@ logoutBtn.addEventListener('click', logout);
 const thresholdSlider = document.getElementById('threshold-slider');
 if (thresholdSlider) { thresholdSlider.addEventListener('input', handleThresholdChange); }
 
+const thresholdDisplay = document.getElementById('threshold-display');
+if (thresholdDisplay) {
+    thresholdDisplay.addEventListener('click', function(e) {
+        e.preventDefault(); // Prevent label from focusing the slider
+        if (this.querySelector('input')) return; // Already editing
+        
+        const currentText = this.textContent.replace('%', '');
+        const currentVal = parseInt(currentText) || 80;
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.max = '100';
+        input.value = currentVal;
+        input.style.width = '50px';
+        input.style.border = 'none';
+        input.style.background = 'transparent';
+        input.style.color = '#ffffff';
+        input.style.fontWeight = '700';
+        input.style.fontSize = '0.9rem';
+        input.style.textAlign = 'center';
+        input.style.outline = 'none';
+        
+        // Stop click propagation
+        input.addEventListener('click', e => e.stopPropagation());
+
+        function commitChange() {
+            let newVal = parseInt(input.value);
+            if (!isNaN(newVal) && newVal >= 0 && newVal <= 100) {
+                if (thresholdSlider) {
+                    thresholdSlider.value = newVal;
+                    // Trigger the same update logic
+                    updateThreshold(newVal);
+                }
+            } else {
+                // Revert if invalid
+                this.textContent = `${currentVal}%`;
+            }
+            // Rely on updateThreshold to redraw text, or do it manually if logic differs
+             if (thresholdDisplay && !thresholdDisplay.contains(input)) {
+                 // already updated by updateThreshold usually, but let's ensure
+             }
+        }
+        
+        input.addEventListener('blur', commitChange);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                input.blur();
+            }
+        });
+
+        this.textContent = '';
+        this.appendChild(input);
+        input.focus();
+    });
+}
+
 (function initializeApp() {
     // Try loading and validating stored credentials immediately so we can hide UI early if valid
     const hasSavedCredentials = Auth.loadFromStorage();

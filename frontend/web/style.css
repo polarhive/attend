@@ -204,6 +204,7 @@ body {
     color: var(--primary);
     font-weight: 700;
     font-size: 0.9rem;
+    cursor: pointer;
 }
 
 .navbar .threshold-control input[type="range"] {
