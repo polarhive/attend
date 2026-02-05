@@ -619,7 +619,7 @@ function generateAttendanceChart(attendanceData, customThreshold = null) {
     const attendedData = attendanceData.map(item => item.attended);
     const skippedData = attendanceData.map(item => item.skipped);
     const totalData = attendanceData.map(item => item.total);
-    const threshold = customThreshold !== null ? customThreshold : (attendanceData[0]?.threshold || 80);
+    const threshold = customThreshold !== null ? customThreshold : (attendanceData[0]?.threshold || 75);
     const thresholdData = totalData.map(total => Math.ceil((threshold / 100) * total));
     window.attendanceChart = new Chart(ctx, {
         type: 'bar',
@@ -934,7 +934,7 @@ function updateUIForLoggedInState() {
 }
 
 
-const ThresholdManager = { getThreshold: () => { const saved = Storage.get(APP_KEYS.THRESHOLD); return saved ? parseInt(saved) : (function () { const v = parseInt("%%SKIPPABLE_THRESHOLD%%", 10); return Number.isFinite(v) ? v : 80; })(); }, saveThreshold: (threshold) => { Storage.set(APP_KEYS.THRESHOLD, threshold.toString()); } };
+const ThresholdManager = { getThreshold: () => { const saved = Storage.get(APP_KEYS.THRESHOLD); return saved ? parseInt(saved) : (function () { const v = parseInt("%%SKIPPABLE_THRESHOLD%%", 10); return Number.isFinite(v) ? v : 75; })(); }, saveThreshold: (threshold) => { Storage.set(APP_KEYS.THRESHOLD, threshold.toString()); } };
 
 const Auth = {
     credentials: { srn: null, password: null, batch_id: null },
@@ -1116,12 +1116,12 @@ if (thresholdSlider) { thresholdSlider.addEventListener('input', handleThreshold
 
 const thresholdDisplay = document.getElementById('threshold-display');
 if (thresholdDisplay) {
-    thresholdDisplay.addEventListener('click', function(e) {
+    thresholdDisplay.addEventListener('click', function (e) {
         e.preventDefault(); // Prevent label from focusing the slider
         if (this.querySelector('input')) return; // Already editing
-        
+
         const currentText = this.textContent.replace('%', '');
-        const currentVal = parseInt(currentText) || 80;
+        const currentVal = parseInt(currentText) || 75;
 
         const input = document.createElement('input');
         input.type = 'number';
@@ -1136,7 +1136,7 @@ if (thresholdDisplay) {
         input.style.fontSize = '0.9rem';
         input.style.textAlign = 'center';
         input.style.outline = 'none';
-        
+
         // Stop click propagation
         input.addEventListener('click', e => e.stopPropagation());
 
@@ -1153,11 +1153,11 @@ if (thresholdDisplay) {
                 this.textContent = `${currentVal}%`;
             }
             // Rely on updateThreshold to redraw text, or do it manually if logic differs
-             if (thresholdDisplay && !thresholdDisplay.contains(input)) {
-                 // already updated by updateThreshold usually, but let's ensure
-             }
+            if (thresholdDisplay && !thresholdDisplay.contains(input)) {
+                // already updated by updateThreshold usually, but let's ensure
+            }
         }
-        
+
         input.addEventListener('blur', commitChange);
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {

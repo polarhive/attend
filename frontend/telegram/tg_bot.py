@@ -164,9 +164,9 @@ class AttendanceAPIClient:
         )
         if threshold is None:
             try:
-                threshold = int(os.getenv("SKIPPABLE_THRESHOLD", "80"))
+                threshold = int(os.getenv("SKIPPABLE_THRESHOLD", "75"))
             except Exception:
-                threshold = 80
+                threshold = 75
 
         if not api_response.get("success"):
             error_details = api_response.get("error", {}).get(
@@ -296,7 +296,7 @@ def send_attendance_report(message):
                         current_threshold = (
                             threshold_override
                             if threshold_override is not None
-                            else int(os.getenv("SKIPPABLE_THRESHOLD", "80"))
+                            else int(os.getenv("SKIPPABLE_THRESHOLD", "75"))
                         )
                         subjects = []
                         attended = []

@@ -1267,7 +1267,7 @@ def bundle_assets():
 
     # Replace build-time placeholders with environment values
     try:
-        SKIPPABLE_THRESHOLD = os.getenv("SKIPPABLE_THRESHOLD", "80")
+        SKIPPABLE_THRESHOLD = os.getenv("SKIPPABLE_THRESHOLD", "75")
         bundle = bundle.replace("%%SKIPPABLE_THRESHOLD%%", str(SKIPPABLE_THRESHOLD))
         app_log(
             "assets.replace_vars",
