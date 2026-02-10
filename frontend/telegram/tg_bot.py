@@ -273,7 +273,6 @@ def send_attendance_report(message):
             return
 
     # Fetch attendance
-    bot.reply_to(message, "⏳ Fetching your attendance data...")
 
     async def fetch_and_send():
         try:
@@ -348,7 +347,11 @@ def send_attendance_report(message):
 
                             if os.path.exists(graph_path):
                                 with open(graph_path, "rb") as photo:
-                                    bot.send_photo(chat_id, photo)
+                                    bot.send_photo(
+                                        chat_id,
+                                        photo,
+                                        reply_to_message_id=message.message_id,
+                                    )
                                 try:
                                     os.remove(graph_path)
                                 except Exception:
@@ -357,7 +360,7 @@ def send_attendance_report(message):
                             logger.error(f"Graph generation failed: {e}")
 
             # Send text summary
-            bot.send_message(chat_id, attendance_text, parse_mode="Markdown")
+            bot.reply_to(message, attendance_text, parse_mode="Markdown")
 
             if api_response.get("success"):
                 logger.info(f"Sent attendance to {chat_id}")
@@ -368,7 +371,7 @@ def send_attendance_report(message):
 
         except Exception as e:
             logger.error(f"Error fetching attendance: {e}")
-            bot.send_message(chat_id, f"❌ Error: {str(e)}")
+            bot.reply_to(message, f"❌ Error: {str(e)}")
 
     # Run async task
     try:
