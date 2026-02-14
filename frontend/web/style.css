@@ -353,36 +353,50 @@ body {
 /* Compact info bar shown to non-logged-in users */
 .info-box {
     width: calc(100% - 4rem);
-    margin: 0 auto var(--space-6);
+    margin: 0 auto var(--space-4);
     display: none;
     align-items: center;
     gap: 1rem;
-    padding: 0.6rem 0.9rem;
+    padding: 0.4rem 0.6rem;
     border-radius: var(--radius-md);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
-    border: 1px solid var(--border);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-    font-size: 0.92rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), rgba(255, 255, 255, 0.005));
+    border: 1px solid var(--border-light);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    font-size: 0.8rem;
 }
 
 .info-bar-text {
-    color: var(--text-secondary);
+    color: var(--text-muted);
     display: flex;
-    gap: 0.75rem;
+    gap: 0.5rem;
     justify-content: center;
-    /* center horizontally */
+    font-size: 0.75rem;
+    line-height: 1.3;
 }
 
 .info-bar-text strong {
-    color: var(--text-primary);
-    margin-right: 0.35rem;
+    color: var(--text-secondary);
+    margin-right: 0.25rem;
     display: inline-block;
+    font-weight: 500;
 }
 
 .info-bar-text span {
     max-width: 70ch;
-    line-height: 1.45;
+    line-height: 1.3;
     display: inline-block;
+    opacity: 0.8;
+}
+
+.info-bar-text a {
+    color: white;
+    text-decoration: underline;
+    text-decoration-color: rgba(255, 255, 255, 0.5);
+}
+
+.info-bar-text a:hover {
+    color: var(--primary-light);
+    text-decoration-color: var(--primary-light);
 }
 
 .info-box .btn-primary,

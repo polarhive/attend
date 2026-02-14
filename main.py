@@ -6,7 +6,6 @@ Run with environment toggles to choose which components start:
  - ENABLE_BACKEND_API: start API (defaults to true)
  - ENABLE_BACKEND_WEB: mount & serve static frontend (defaults to true)
  - ENABLE_BACKEND_TELEGRAM: launch the telegram bot as a subprocess (defaults to false)
- - ENABLE_BACKEND_BUNDLE: bundle frontend assets at startup (defaults to false)
 
 Examples:
     # Run API and bot, but do not serve frontend
@@ -23,7 +22,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, quote, urlencode
 from fastapi import FastAPI, APIRouter, HTTPException, status, Body
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.gzip import GZipMiddleware
 from dataclasses import dataclass
 import subprocess
@@ -139,9 +138,6 @@ class AppSettings:
         )
         self.ENABLE_BACKEND_TELEGRAM = os.getenv(
             "ENABLE_BACKEND_TELEGRAM", "false"
-        ).lower() in ("1", "true", "yes")
-        self.ENABLE_BACKEND_BUNDLE = os.getenv(
-            "ENABLE_BACKEND_BUNDLE", "false"
         ).lower() in ("1", "true", "yes")
 
 
@@ -1173,6 +1169,37 @@ async def serve_mapping_json():
         return JSONResponse(content=payload, status_code=status_code)
 
 
+# Serve cached JavaScript files with long-term caching
+@app.get("/chart.min.js", include_in_schema=False)
+async def serve_chart_js():
+    repo_root = Path(__file__).resolve().parent
+    file_path = repo_root / "frontend" / "web" / "chart.min.js"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="chart.min.js not found")
+    
+    response = FileResponse(
+        path=file_path,
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"}
+    )
+    return response
+
+
+@app.get("/i.js", include_in_schema=False)
+async def serve_i_js():
+    repo_root = Path(__file__).resolve().parent
+    file_path = repo_root / "frontend" / "web" / "i.js"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="i.js not found")
+    
+    response = FileResponse(
+        path=file_path,
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"}
+    )
+    return response
+
+
 if settings.ENABLE_BACKEND_WEB:
     app.mount("/", StaticFiles(directory="frontend/web", html=True), name="frontend")
 else:
@@ -1217,132 +1244,12 @@ else:
         return JSONResponse(content=response_payload, status_code=status_code)
 
 
-def bundle_assets():
-    """Bundle frontend JS and CSS assets."""
-    repo_root = Path(__file__).resolve().parent
-    web_dir = repo_root / "frontend" / "web"
-
-    # Update CACHE_NAME in sw.js with commit hash
-    commit_hash = os.getenv("VERCEL_GIT_COMMIT_SHA")
-    if commit_hash:
-        commit_hash = commit_hash[:7]  # Short hash
-    else:
-        import subprocess
-
-        commit_hash = (
-            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
-            .decode()
-            .strip()
-        )
-    sw_path = web_dir / "sw.js"
-    content = sw_path.read_text()
-    content = re.sub(
-        r"const CACHE_NAME = 'attendance-tracker-' \+ '.*';",
-        f"const CACHE_NAME = 'attendance-tracker-' + '{commit_hash}';",
-        content,
-    )
-    sw_path.write_text(content)
-    app_log(
-        "assets.cache_updated",
-        f"Updated CACHE_NAME in sw.js to attendance-tracker-{commit_hash}",
-    )
-    # JS bundle
-    js_files = ["chart.min.js", "i.js", "script.js"]
-    app_log("assets.bundling", f"Bundling {' '.join(js_files)}")
-    bundle_path = web_dir / "bundle.min.js"
-    if bundle_path.exists():
-        bundle_path.unlink()
-    bundle = ""
-    for file in js_files:
-        with open(web_dir / file, "r", encoding="utf-8") as f:
-            content = f.read()
-            # Remove source map comments
-            lines = content.splitlines()
-            lines = [
-                line
-                for line in lines
-                if not line.strip().startswith("//# sourceMappingURL")
-            ]
-            bundle += "\n".join(lines) + "\n"
-
-    # Replace build-time placeholders with environment values
-    try:
-        SKIPPABLE_THRESHOLD = os.getenv("SKIPPABLE_THRESHOLD", "75")
-        bundle = bundle.replace("%%SKIPPABLE_THRESHOLD%%", str(SKIPPABLE_THRESHOLD))
-        app_log(
-            "assets.replace_vars",
-            f"Applied SKIPPABLE_THRESHOLD={SKIPPABLE_THRESHOLD} to JS bundle",
-        )
-    except Exception as e:
-        app_log(
-            "assets.replace_vars_failed", f"Failed to apply build vars: {e}", "warning"
-        )
-
-    try:
-        try:
-            import rjsmin
-
-            minified = rjsmin.jsmin(bundle)
-            with open(bundle_path, "w", encoding="utf-8") as f:
-                f.write(minified)
-            app_log(
-                "assets.bundle_done",
-                f"Frontend JS assets bundled successfully (minified): {bundle_path}",
-            )
-        except Exception:
-            # Fall back to writing the unminified bundle if rjsmin is unavailable
-            with open(bundle_path, "w", encoding="utf-8") as f:
-                f.write(bundle)
-            app_log(
-                "assets.bundle_done",
-                f"Frontend JS assets bundled successfully (unminified): {bundle_path}",
-            )
-    except Exception as e:
-        app_log("assets.bundle_failed", f"Failed to write bundle: {e}", "error")
-
-    # Minify CSS (write style.min.css). Uses rcssmin when available, falls back to a simple stripper.
-    css_src = web_dir / "style.css"
-    css_min_path = web_dir / "style.min.css"
-    if css_src.exists():
-        try:
-            try:
-                import rcssmin
-
-                minified = rcssmin.cssmin(css_src.read_text(encoding="utf-8"))
-            except Exception:
-                # Fallback: remove block comments and collapse whitespace
-                content = css_src.read_text(encoding="utf-8")
-                minified = re.sub(r"/\*.*?\*/", "", content, flags=re.S)
-                minified = re.sub(r"\s+", " ", minified).strip()
-
-            with open(css_min_path, "w", encoding="utf-8") as f:
-                f.write(minified)
-            app_logger.info("Minified CSS written to %s", css_min_path)
-        except Exception as e:
-            app_logger.warning("Failed to minify CSS: %s", e)
-    else:
-        app_logger.warning("CSS source file not found at: %s", css_src)
-
-
 def run(argv: list | None = None) -> None:
     """Run the application. This is also used as the package console entrypoint (scripts: attend)."""
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--bundle",
-        action="store_true",
-        help="Update CACHE_NAME in sw.js with commit hash and bundle assets",
-    )
     args = parser.parse_args(argv)
-
-    if args.bundle:
-        bundle_assets()
-        sys.exit(0)
-
-    # Bundle at startup if enabled
-    if settings.ENABLE_BACKEND_BUNDLE:
-        bundle_assets()
 
     # Start Telegram bot subprocess if enabled
     bot_proc = None

@@ -203,7 +203,7 @@ class AttendanceAPIClient:
 
 def is_authorized(chat_id: int) -> bool:
     """Check if chat_id is authorized"""
-    return TELEGRAM_CHAT_ID and str(chat_id) == str(TELEGRAM_CHAT_ID)
+    return bool(TELEGRAM_CHAT_ID and str(chat_id) == str(TELEGRAM_CHAT_ID))
 
 
 @bot.message_handler(commands=["start", "help"])
@@ -253,8 +253,8 @@ def send_attendance_report(message):
         username = TELEGRAM_PESU_USERNAME
         password = TELEGRAM_PESU_PASSWORD
         if not is_authorized(chat_id):
-            bot.reply_to(
-                message,
+            bot.send_message(
+                chat_id,
                 (
                     "⚠️ Your chat ID is not authorized to use stored credentials.\n"
                     "To proceed, either: use `/get <username> <password>` with credentials, or set `TELEGRAM_CHAT_ID` in the bot's environment to allow stored credentials."
@@ -263,8 +263,8 @@ def send_attendance_report(message):
             return
 
         if not username or not password:
-            bot.reply_to(
-                message,
+            bot.send_message(
+                chat_id,
                 (
                     "❌ PESU credentials not configured for stored use.\n"
                     "Either set `TELEGRAM_PESU_USERNAME` and `TELEGRAM_PESU_PASSWORD` in `.env`, or call `/get <username> <password>` to provide them inline."
@@ -350,7 +350,6 @@ def send_attendance_report(message):
                                     bot.send_photo(
                                         chat_id,
                                         photo,
-                                        reply_to_message_id=message.message_id,
                                     )
                                 try:
                                     os.remove(graph_path)
@@ -360,7 +359,7 @@ def send_attendance_report(message):
                             logger.error(f"Graph generation failed: {e}")
 
             # Send text summary
-            bot.reply_to(message, attendance_text, parse_mode="Markdown")
+            bot.send_message(chat_id, attendance_text, parse_mode="Markdown")
 
             if api_response.get("success"):
                 logger.info(f"Sent attendance to {chat_id}")
@@ -371,14 +370,14 @@ def send_attendance_report(message):
 
         except Exception as e:
             logger.error(f"Error fetching attendance: {e}")
-            bot.reply_to(message, f"❌ Error: {str(e)}")
+            bot.send_message(chat_id, f"❌ Error: {str(e)}")
 
     # Run async task
     try:
         asyncio.run(fetch_and_send())
     except Exception as e:
         logger.error(f"Failed to fetch attendance: {e}")
-        bot.reply_to(message, f"❌ Error fetching attendance: {str(e)}")
+        bot.send_message(chat_id, f"❌ Error fetching attendance: {str(e)}")
 
 
 def is_valid_user(chat_id):

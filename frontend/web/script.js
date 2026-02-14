@@ -29,9 +29,9 @@ const FORM_HTML = `
 const THRESHOLD_HTML = `
     <label for="threshold-slider">
         <span class="threshold-label">Min:</span>
-        <span id="threshold-display" class="threshold-value">%%SKIPPABLE_THRESHOLD%%%</span>
+        <span id="threshold-display" class="threshold-value">75%</span>
     </label>
-    <input type="range" id="threshold-slider" min="50" max="100" value="%%SKIPPABLE_THRESHOLD%%" step="1">
+    <input type="range" id="threshold-slider" min="50" max="100" value="75" step="1">
 `;
 
 const SKELETON_HTML = `<div class="skeleton skeleton-chart"></div><div class="skeleton skeleton-table"></div>`;
@@ -49,36 +49,6 @@ const Storage = {
     delete: (name) => { localStorage.removeItem(name); },
     deleteAll: () => { Storage.delete(APP_KEYS.CREDENTIALS); Storage.delete(APP_KEYS.THRESHOLD); Storage.delete(APP_KEYS.VERSION); }
 };
-
-// Version check for cache busting
-async function checkVersion() {
-    try {
-        const response = await fetch(`/sw.js`, { cache: 'no-cache' });
-        const text = await response.text();
-        const match = text.match(/const CACHE_NAME = 'attendance-tracker-' \+ '([^']+)';/);
-        if (match) {
-            const currentVersion = match[1];
-            logEvent('version.info', { version: currentVersion });
-            const storedVersion = Storage.get(APP_KEYS.VERSION);
-            if (storedVersion !== currentVersion) {
-                // Prefer a non-modal in-page notification instead of alert.
-                const hadStoredData = Boolean(Storage.get('credentials'));
-                if (hadStoredData) {
-                    showNotification('App updated! Logging out.', 'info', 3500);
-                    Storage.deleteAll();
-                } else {
-                    showNotification('App updated! Refreshing.', 'info', 2500);
-                }
-                logEvent('sw.update_available', {}, 'info');
-                // Remember new version and reload after a short delay so notification is visible
-                Storage.set(APP_KEYS.VERSION, currentVersion);
-                setTimeout(() => window.location.reload(), 600);
-            }
-        }
-    } catch (e) {
-        console.warn('Version check failed:', e);
-    }
-}
 
 function buildStaticDOM() {
     buildBackground();
@@ -166,27 +136,16 @@ function buildMainContent() {
     main.className = 'container';
 
     const fragment = document.createDocumentFragment();
-    const how = createHowItWorksBox();
     const formWrapper = createFormWrapper();
     const skeleton = createSkeletonLoader();
     const result = createResultContainer();
 
-    fragment.appendChild(how);
     fragment.appendChild(formWrapper);
     fragment.appendChild(skeleton);
     fragment.appendChild(result);
 
     main.appendChild(fragment);
     document.body.appendChild(main);
-}
-
-function createHowItWorksBox() {
-    const how = document.createElement('div');
-    how.id = 'how-it-works';
-    how.className = 'info-box';
-    how.setAttribute('role', 'region');
-    how.innerHTML = `<div class="info-bar-text"><span>Credentials stored locally on your browser. No SRN or personal data logged. Checkout the code on GitHub.</span></div>`;
-    return how;
 }
 
 function createFormWrapper() {
@@ -220,7 +179,6 @@ function createResultContainer() {
 
 // Build the DOM immediately
 buildStaticDOM();
-checkVersion();
 
 // DOM Elements (now available)
 const form = document.getElementById('attendance-form');
@@ -489,8 +447,6 @@ const LOG_TEMPLATES = {
     'validation.invalid_srn': 'Invalid SRN format',
     'semester.auto_selected': 'Semester auto-selected, submit to get attendance',
     'semester.fetch_error': 'Error fetching semesters: ${error}',
-    'sw.update_available': 'App updated! Refresh to get the latest version.',
-    'sw.registration_failed': 'ServiceWorker registration failed',
     'network.online': 'Back online! You can fetch new attendance data.',
     'network.offline': 'You are offline. App will work with cached data.',
     'version.info': 'Version: https://github.com/polarhive/attend/commit/${version}',
@@ -934,7 +890,7 @@ function updateUIForLoggedInState() {
 }
 
 
-const ThresholdManager = { getThreshold: () => { const saved = Storage.get(APP_KEYS.THRESHOLD); return saved ? parseInt(saved) : (function () { const v = parseInt("%%SKIPPABLE_THRESHOLD%%", 10); return Number.isFinite(v) ? v : 75; })(); }, saveThreshold: (threshold) => { Storage.set(APP_KEYS.THRESHOLD, threshold.toString()); } };
+const ThresholdManager = { getThreshold: () => { const saved = Storage.get(APP_KEYS.THRESHOLD); return saved ? parseInt(saved) : (function () { const v = parseInt("75", 10); return Number.isFinite(v) ? v : 75; })(); }, saveThreshold: (threshold) => { Storage.set(APP_KEYS.THRESHOLD, threshold.toString()); } };
 
 const Auth = {
     credentials: { srn: null, password: null, batch_id: null },
@@ -1214,24 +1170,6 @@ if (thresholdDisplay) {
 })();
 
 window.addEventListener('popstate', () => { updateUIForLoggedInState(); });
-
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function () {
-        navigator.serviceWorker.register('/sw.js')
-            .then(function (registration) {
-                registration.addEventListener('updatefound', function () {
-                    const newWorker = registration.installing;
-                    newWorker.addEventListener('statechange', function () {
-                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                            logEvent('sw.update_available', {}, 'info');
-                            try { showNotification(renderLogTemplate('sw.update_available'), 'info', 5000); } catch (e) { /* ignore */ }
-                        }
-                    });
-                });
-            })
-            .catch(function (err) { logEvent('sw.registration_failed', {}, 'error'); });
-    });
-}
 
 window.addEventListener('online', function () {
     isOffline = false;
