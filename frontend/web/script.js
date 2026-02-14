@@ -40,14 +40,15 @@ const SKELETON_HTML = `<div class="skeleton skeleton-chart"></div><div class="sk
 const APP_KEYS = {
     CREDENTIALS: 'credentials',
     THRESHOLD: 'app.threshold',
-    VERSION: 'app.version'
+    VERSION: 'app.version',
+    ATTENDANCE: 'app.attendance'
 };
 
 const Storage = {
     set: (name, value) => { localStorage.setItem(name, value); },
     get: (name) => { return localStorage.getItem(name); },
     delete: (name) => { localStorage.removeItem(name); },
-    deleteAll: () => { Storage.delete(APP_KEYS.CREDENTIALS); Storage.delete(APP_KEYS.THRESHOLD); Storage.delete(APP_KEYS.VERSION); }
+    deleteAll: () => { Storage.delete(APP_KEYS.CREDENTIALS); Storage.delete(APP_KEYS.THRESHOLD); Storage.delete(APP_KEYS.VERSION); Storage.delete(APP_KEYS.ATTENDANCE); }
 };
 
 function buildStaticDOM() {
@@ -121,7 +122,8 @@ function createLogoutButton() {
     logoutBtn.id = 'logout-btn';
     logoutBtn.className = 'btn-secondary';
     logoutBtn.style.display = 'none';
-    logoutBtn.innerHTML = LOGOUT_ICON_SVG;
+    logoutBtn.setAttribute('aria-label', 'Logout');
+    logoutBtn.textContent = 'Logout';
     return logoutBtn;
 }
 
@@ -201,6 +203,55 @@ function showNotification(message, type = 'info', timeout = 3000) {
         }
     } catch (e) {
         console.warn('Failed to show notification:', e);
+    }
+}
+
+// Navbar cache indicator (small pulsing dot + optional text)
+function showNavbarCacheIndicator() {
+    const controls = document.querySelector('.navbar-controls');
+    if (!controls) return;
+    let el = document.getElementById('cache-indicator');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'cache-indicator';
+        el.className = 'cache-indicator stale';
+        el.setAttribute('title', 'Cached attendance available — refreshing in background');
+        el.innerHTML = `<span class="cache-dot" aria-hidden="true"></span><span class="cache-text">Cached</span>`;
+        el.style.cursor = 'pointer';
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (cachedAttendanceData && Array.isArray(cachedAttendanceData) && cachedAttendanceData.length > 0) {
+                displayAttendance({ attendance: cachedAttendanceData });
+                hideNavbarCacheIndicator();
+                showNotification('Showing cached attendance', 'info', 1800);
+            }
+        });
+        controls.appendChild(el);
+        // hide logout while cache indicator is present
+        const lb = document.getElementById('logout-btn'); if (lb) lb.style.display = 'none';
+    } else {
+        el.classList.remove('fresh');
+        el.classList.add('stale');
+        const txt = el.querySelector('.cache-text'); if (txt) txt.textContent = 'Cached';
+        el.style.display = 'inline-flex';
+        const lb = document.getElementById('logout-btn'); if (lb) lb.style.display = 'none';
+    }
+}
+
+function hideNavbarCacheIndicator() {
+    const el = document.getElementById('cache-indicator');
+    if (el) el.remove();
+    const lb = document.getElementById('logout-btn');
+    if (lb) { lb.classList.remove('compact'); lb.style.display = Auth.isLoggedIn() ? 'block' : 'none'; }
+}
+
+function markCacheFresh() {
+    // Immediately replace the cache indicator with the Logout button in the same place/size
+    hideNavbarCacheIndicator();
+    const lb = document.getElementById('logout-btn');
+    if (lb) {
+        lb.classList.add('compact');
+        lb.style.display = Auth.isLoggedIn() ? 'block' : 'none';
     }
 }
 
@@ -293,6 +344,7 @@ let SRN_REGEX = /^PES[12](?:UG|PG)\d{2}[A-Z]{2}\d{3}$/;
 // Global State
 let isProcessing = false;
 let currentAttendanceData = null;
+let cachedAttendanceData = null; // holds cached attendance for optional preview (not auto-displayed)
 let isOffline = false;
 let availableSemesters = null;
 // Track whether stage-2 loader has already been shown to avoid duplicates
@@ -374,12 +426,11 @@ function fadeInElement(el, ms = 300, display = 'block') {
 }
 
 function ensureLoaderInserted() {
+    // revert to original behavior: insert loader directly after the navbar (old animation)
     const nav = document.querySelector('.navbar');
     if (!nav) return;
     if (!loadingContainer.parentNode || loadingContainer.parentNode !== nav.parentNode) {
-        // insert directly after navbar to avoid gaps
         nav.parentNode.insertBefore(loadingContainer, nav.nextSibling);
-        // small gap to visually match the chart/card top gap
         loadingContainer.style.marginTop = '12px';
         loadingContainer.style.display = 'none';
         loadingContainer.style.width = '100%';
@@ -390,7 +441,7 @@ async function showStage2Loader() {
     ensureLoaderInserted();
     if (stage2Shown) return;
     stage2Shown = true;
-    // hide any result area while loading
+    // hide entire result area and show the old top loader animation
     const result = document.getElementById('result');
     if (result) result.style.display = 'none';
     await fadeInElement(loadingContainer, 240, 'block');
@@ -402,7 +453,6 @@ async function showStage3Result() {
     stage2Shown = false;
     const result = document.getElementById('result');
     if (result) {
-        // show instantly without animation
         result.style.transition = 'none';
         result.style.display = 'block';
         result.style.opacity = '1';
@@ -631,10 +681,10 @@ function updateskippableValues(threshold) {
             if (skippableCell) {
                 let skippableHtml;
                 if (newskippable > 0) {
-                    skippableHtml = `<span class="skippable-skip">✔ Skip ${newskippable}</span>`;
+                    skippableHtml = `<span class="skippable-skip">Skip ${newskippable}</span>`;
                 } else if (newskippable < 0) {
                     const need = Math.abs(newskippable);
-                    skippableHtml = `<span class="skippable-need">✘ Need ${need}</span>`;
+                    skippableHtml = `<span class="skippable-need">Need ${need}</span>`;
                 } else {
                     skippableHtml = '0';
                 }
@@ -731,6 +781,11 @@ function recalculateRow(index) {
     updateRowDisplay(index, percentage, skippable);
     if (currentAttendanceData) {
         generateAttendanceChart(currentAttendanceData, threshold);
+        // Persist user edits to the local cache so UI remains instant on reload
+        try {
+            Storage.set(APP_KEYS.ATTENDANCE, JSON.stringify({ ts: Date.now(), attendance: currentAttendanceData }));
+            cachedAttendanceData = currentAttendanceData;
+        } catch (e) { console.warn('Failed to update attendance cache', e); }
     }
 }
 
@@ -844,10 +899,10 @@ function generateTableRowHtml(item, index) {
 
 function getSkippableHtml(skippable) {
     if (skippable > 0) {
-        return `<span class="skippable-skip">✔ Skip ${skippable}</span>`;
+        return `<span class="skippable-skip">Skip ${skippable}</span>`;
     } else if (skippable < 0) {
         const need = Math.abs(skippable);
-        return `<span class="skippable-need">✘ Need ${need}</span>`;
+        return `<span class="skippable-need">Need ${need}</span>`;
     } else {
         return '0';
     }
@@ -867,7 +922,9 @@ function updateUIForLoggedInState() {
     const isLoggedIn = Auth.isLoggedIn();
     const navbarThreshold = document.getElementById('navbar-threshold');
     form.style.display = isLoggedIn ? 'none' : 'block';
-    logoutBtn.style.display = isLoggedIn ? 'block' : 'none';
+    // Hide logout when cached-attendance indicator is visible (cached UI takes its place)
+    const cacheEl = document.getElementById('cache-indicator');
+    logoutBtn.style.display = (isLoggedIn && !cacheEl) ? 'block' : 'none';
     if (navbarThreshold) { navbarThreshold.style.display = isLoggedIn ? 'block' : 'none'; }
     const githubLink = document.getElementById('github-link');
     if (githubLink) { githubLink.style.display = isLoggedIn ? 'none' : 'inline-flex'; }
@@ -916,20 +973,20 @@ function checkSRNValidity() {
     }
 }
 
-async function fetchAttendance(srn, password, batchId = null) {
+async function fetchAttendance(srn, password, batchId = null, background = false) {
     if (isProcessing) { logEvent('fetch.in_progress', {}, 'error'); return; }
     if (isOffline) { logEvent('network.offline_fetch_blocked', {}, 'error'); return; }
     try {
-        // Ensure button shows fetch state
-        setSubmitState(true, 'Fetching attendance...');
-
-        clearLogs();
-        setLoadingState(true);
+        // For background fetches, keep the UI intact and avoid global loaders
+        if (!background) {
+            // Ensure button shows fetch state
+            setSubmitState(true, 'Fetching attendance...');
+            clearLogs();
+            setLoadingState(true);
+        }
         isProcessing = true;
 
         logEvent('fetch.start', { srn }, 'info');
-        // logEvent('auth.validating', {}, 'info');
-        // logEvent('academy.connecting', {}, 'info');
         const requestStartTime = performance.now();
 
         const response = await fetch('/api/attendance', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' }, body: JSON.stringify({ username: srn, password: password, batch_id: batchId }) });
@@ -942,16 +999,23 @@ async function fetchAttendance(srn, password, batchId = null) {
         const requestDuration = requestEndTime - requestStartTime;
         let durationText; if (requestDuration >= 1000) durationText = `${(requestDuration / 1000).toFixed(1)} seconds`; else durationText = `${Math.round(requestDuration)}ms`;
         logEvent('fetch.server_responded', { duration: durationText }, 'info');
-        // logEvent('fetch.parsing', {}, 'info');
-
-
 
         const attendanceData = { attendance: data.data.attendance || data.data };
         logEvent('fetch.found_subjects', { count: attendanceData.attendance.length }, 'info');
         Auth.save(srn, password);
-        // logEvent('ui.rendering', {}, 'info');
+
+        // If we displayed cached data earlier, replace it seamlessly with fresh data
         displayAttendance(attendanceData);
         updateUIForLoggedInState();
+
+        // Cache the fetched attendance locally for instant reloads
+        try {
+            Storage.set(APP_KEYS.ATTENDANCE, JSON.stringify({ ts: Date.now(), attendance: attendanceData.attendance }));
+            cachedAttendanceData = attendanceData.attendance;
+            // mark cache as fresh (green) then hide after a moment
+            markCacheFresh(900);
+            logEvent('cache.attendance_saved', { count: attendanceData.attendance.length }, 'info');
+        } catch (e) { console.warn('Failed to save attendance cache', e); }
 
         // If backend discovered batchClassId(s) at runtime, include them in logs
         const discovered = data.data?.discovered_batch_ids || [];
@@ -959,16 +1023,23 @@ async function fetchAttendance(srn, password, batchId = null) {
             logEvent('mapping.auto_discovered', { count: discovered.length }, 'info');
         }
 
-
         logEvent('fetch.complete', {}, 'info');
     } catch (error) {
         logEvent('error.generic', { error: error.message }, 'error');
-        Auth.clear();
+        // If we have cached attendance, show it as a read-only fallback instead of clearing credentials immediately
+        if (cachedAttendanceData && Array.isArray(cachedAttendanceData) && cachedAttendanceData.length > 0) {
+            // only display cached if not already visible
+            displayAttendance({ attendance: cachedAttendanceData });
+            showNotification('Unable to fetch latest data — showing cached attendance', 'warning', 3000);
+            hideNavbarCacheIndicator();
+        } else {
+            Auth.clear();
+        }
     } finally {
-        setLoadingState(false);
+        if (!background) setLoadingState(false);
         isProcessing = false;
         clearSubmitMode();
-        setSubmitState(false);
+        if (!background) setSubmitState(false);
     }
 }
 
@@ -1130,8 +1201,31 @@ if (thresholdDisplay) {
 (function initializeApp() {
     // Try loading and validating stored credentials immediately so we can hide UI early if valid
     const hasSavedCredentials = Auth.loadFromStorage();
-    if (hasSavedCredentials) {
+
+    // Load cached attendance (if present) and show it immediately in the chart area.
+    // We'll refresh the data in the background and update the chart once fresh data arrives.
+    const cachedRaw = Storage.get(APP_KEYS.ATTENDANCE);
+    if (cachedRaw) {
+        try {
+            const cachedObj = JSON.parse(cachedRaw);
+            if (cachedObj && Array.isArray(cachedObj.attendance) && cachedObj.attendance.length > 0) {
+                cachedAttendanceData = cachedObj.attendance;
+                // show cached attendance immediately
+                displayAttendance({ attendance: cachedAttendanceData });
+                // ensure UI reflects logged-in state/controls
+                updateUIForLoggedInState();
+                // indicate data is cached and will be refreshed in background
+                showNavbarCacheIndicator();
+            }
+        } catch (e) { console.warn('Failed to parse cached attendance', e); }
+    }
+
+    if (hasSavedCredentials && !cachedAttendanceData) {
+        // only show global loading when there is no cached UI to display
         setLoadingState(true);
+    }
+
+    if (hasSavedCredentials) {
         document.addEventListener('DOMContentLoaded', () => {
             const formWrapper = document.querySelector('.form-wrapper');
             const howBox = document.getElementById('how-it-works');
@@ -1147,10 +1241,20 @@ if (thresholdDisplay) {
             const formWrapper = document.querySelector('.form-wrapper');
             try {
                 if (formWrapper) await fadeOutElement(formWrapper, 200);
-                await showStage2Loader();
-                if (Auth.credentials.srn && Auth.credentials.password) {
-                    await fetchAttendance(Auth.credentials.srn, Auth.credentials.password, Auth.credentials.batch_id);
-                    await showStage3Result();
+
+                // If we already displayed cached data, fetch in background and update the chart when done.
+                if (cachedAttendanceData) {
+                    // background fetch — do not show the interstitial loader
+                    if (Auth.credentials.srn && Auth.credentials.password) {
+                        fetchAttendance(Auth.credentials.srn, Auth.credentials.password, Auth.credentials.batch_id, true).catch(() => { /* ignore background errors */ });
+                    }
+                } else {
+                    // no cached data — show loader and fetch normally
+                    await showStage2Loader();
+                    if (Auth.credentials.srn && Auth.credentials.password) {
+                        await fetchAttendance(Auth.credentials.srn, Auth.credentials.password, Auth.credentials.batch_id);
+                        await showStage3Result();
+                    }
                 }
             } catch (e) {
                 // fallback to default UI if anything fails

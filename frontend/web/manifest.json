@@ -1,0 +1,33 @@
+{
+    "name": "Attend",
+    "short_name": "Attend",
+    "description": "Track your PESU attendance with interactive charts and threshold management",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#007aff",
+    "orientation": "portrait-primary",
+    "scope": "/",
+    "lang": "en",
+    "icons": [
+        {
+            "src": "/favicon.ico",
+            "sizes": "48x48",
+            "type": "image/x-icon"
+        }
+    ],
+    "categories": [
+        "education",
+        "productivity"
+    ],
+    "screenshots": [],
+    "shortcuts": [
+        {
+            "name": "Check Attendance",
+            "short_name": "Attendance",
+            "description": "View your current attendance status",
+            "url": "/",
+            "icons": []
+        }
+    ]
+}

@@ -9,6 +9,7 @@
     <meta name="theme-color" content="#6366f1" />
     <title>Attend • Track Your Attendance</title>
     <link rel="stylesheet" href="style.css" />
+    <link rel="manifest" href="manifest.json" />
     <link rel="icon" href="favicon.ico" type="image/x-icon" />
 </head>
 
@@ -16,6 +17,16 @@
     <script src="chart.min.js"></script>
     <script src="i.js"></script>
     <script src="script.js"></script>
+
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('sw.js')
+            .then(reg => console.log('ServiceWorker registered:', reg.scope))
+            .catch(err => console.warn('SW registration failed:', err));
+        });
+      }
+    </script>
 </body>
 
 </html>
