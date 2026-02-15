@@ -1002,7 +1002,7 @@ async function fetchAttendance(srn, password, batchId = null, background = false
 
         const attendanceData = { attendance: data.data.attendance || data.data };
         logEvent('fetch.found_subjects', { count: attendanceData.attendance.length }, 'info');
-        Auth.save(srn, password);
+        Auth.save(srn, password, batchId);
 
         // If we displayed cached data earlier, replace it seamlessly with fresh data
         displayAttendance(attendanceData);

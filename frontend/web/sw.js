@@ -7,8 +7,7 @@ const ASSETS = [
   'chart.min.js',
   'mapping.json',
   'manifest.json',
-  'favicon.ico',
-  'icons/icon.svg'
+  'favicon.ico'
 ];
 
 self.addEventListener('install', event => {
