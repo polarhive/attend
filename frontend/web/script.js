@@ -84,10 +84,12 @@ function buildNavbar() {
 
     const githubLink = createGitHubLink();
     const navbarThreshold = createNavbarThreshold();
+    const navbarSpinner = createNavbarSpinner();
     const logoutBtn = createLogoutButton();
 
     controls.appendChild(githubLink);
     controls.appendChild(navbarThreshold);
+    controls.appendChild(navbarSpinner);
     controls.appendChild(logoutBtn);
 
     nav.appendChild(titleWrap);
@@ -106,6 +108,17 @@ function createGitHubLink() {
     githubLink.setAttribute('aria-label', 'GitHub');
     githubLink.innerHTML = GITHUB_ICON_SVG;
     return githubLink;
+}
+
+function createNavbarSpinner() {
+    const spinner = document.createElement('div');
+    spinner.id = 'global-spinner';
+    spinner.className = 'navbar-spinner';
+    spinner.setAttribute('role', 'status');
+    spinner.setAttribute('aria-hidden', 'true');
+    spinner.title = 'Fetching...';
+    spinner.style.display = 'none';
+    return spinner;
 }
 
 function createNavbarThreshold() {
@@ -238,6 +251,49 @@ function showNavbarCacheIndicator() {
     }
 }
 
+function showNavbarSpinner(force = false) {
+    const el = document.getElementById('global-spinner');
+    if (!el) return;
+    // If an attendance chart is already present, do not show the navbar spinner unless forced.
+    if (!force && document.getElementById('attendanceChart')) {
+        el.style.display = 'none';
+        el.setAttribute('aria-hidden', 'true');
+        return;
+    }
+    el.style.display = 'inline-block';
+    el.setAttribute('aria-hidden', 'false');
+}
+
+function hideNavbarSpinner() {
+    const el = document.getElementById('global-spinner');
+    if (!el) return;
+    el.style.display = 'none';
+    el.setAttribute('aria-hidden', 'true');
+}
+
+// Show a centered in-chart message when there is no chart to display (used during fetch)
+function showInChartMessage(text) {
+    const result = document.getElementById('result');
+    if (!result) return;
+    // If a chart already exists, do not show the in-chart message
+    if (document.getElementById('attendanceChart')) return;
+
+    let el = document.getElementById('in-chart-message');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'in-chart-message';
+        el.className = 'in-chart-message';
+        result.innerHTML = '';
+        result.appendChild(el);
+    }
+    el.innerHTML = `<div class="msg-text">${text || 'Fetching attendance'}<span class="dots"><span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></span></div>`;
+}
+
+function hideInChartMessage() {
+    const el = document.getElementById('in-chart-message');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+
 function hideNavbarCacheIndicator() {
     const el = document.getElementById('cache-indicator');
     if (el) el.remove();
@@ -347,32 +403,7 @@ let currentAttendanceData = null;
 let cachedAttendanceData = null; // holds cached attendance for optional preview (not auto-displayed)
 let isOffline = false;
 let availableSemesters = null;
-// Track whether stage-2 loader has already been shown to avoid duplicates
-let stage2Shown = false;
-
-// Create loading animation container with skeleton
-const loadingContainer = document.createElement('div');
-loadingContainer.className = 'loading-container';
-loadingContainer.innerHTML = `
-    <div class="loading-text">Fetching your attendance data...</div>
-    <div class="loading-dots">
-        <div class="loading-dot"></div>
-        <div class="loading-dot"></div>
-        <div class="loading-dot"></div>
-        <div class="loading-dot"></div>
-        <div class="loading-dot"></div>
-    </div>
-    <div class="skeleton-loader" style="margin-top: 2rem;">
-        <div class="skeleton-chart-container">
-            <div class="skeleton-bar"></div>
-            <div class="skeleton-bar"></div>
-            <div class="skeleton-bar"></div>
-            <div class="skeleton-bar"></div>
-            <div class="skeleton-bar"></div>
-        </div>
-    </div>
-`;
-// Loader will be inserted into the DOM when needed (see ensureLoaderInserted)
+// Loader removed — interstitial animation cleaned up and related DOM/CSS deleted.
 
 // Create offline indicator
 const offlineIndicator = document.createElement('div');
@@ -425,39 +456,9 @@ function fadeInElement(el, ms = 300, display = 'block') {
     });
 }
 
-function ensureLoaderInserted() {
-    // revert to original behavior: insert loader directly after the navbar (old animation)
-    const nav = document.querySelector('.navbar');
-    if (!nav) return;
-    if (!loadingContainer.parentNode || loadingContainer.parentNode !== nav.parentNode) {
-        nav.parentNode.insertBefore(loadingContainer, nav.nextSibling);
-        loadingContainer.style.marginTop = '12px';
-        loadingContainer.style.display = 'none';
-        loadingContainer.style.width = '100%';
-    }
-}
 
-async function showStage2Loader() {
-    ensureLoaderInserted();
-    if (stage2Shown) return;
-    stage2Shown = true;
-    // hide entire result area and show the old top loader animation
-    const result = document.getElementById('result');
-    if (result) result.style.display = 'none';
-    await fadeInElement(loadingContainer, 240, 'block');
-}
 
-async function showStage3Result() {
-    // fade loader out and reveal result area
-    await fadeOutElement(loadingContainer, 200);
-    stage2Shown = false;
-    const result = document.getElementById('result');
-    if (result) {
-        result.style.transition = 'none';
-        result.style.display = 'block';
-        result.style.opacity = '1';
-    }
-}
+
 
 async function showOfflineBanner() {
     try {
@@ -617,7 +618,12 @@ function clearLogs() {
 
 
 function generateAttendanceChart(attendanceData, customThreshold = null) {
-    const ctx = document.getElementById('attendanceChart').getContext('2d');
+    // Ensure any in-chart "fetching" message is removed when we actually render the chart
+    hideInChartMessage();
+
+    const canvas = document.getElementById('attendanceChart');
+    if (!canvas) return; // nothing to draw into
+    const ctx = canvas.getContext('2d');
     if (window.attendanceChart instanceof Chart) {
         window.attendanceChart.destroy();
     }
@@ -781,6 +787,8 @@ function recalculateRow(index) {
     updateRowDisplay(index, percentage, skippable);
     if (currentAttendanceData) {
         generateAttendanceChart(currentAttendanceData, threshold);
+        // Ensure any in-chart message is hidden when user edits the data
+        hideInChartMessage();
         // Persist user edits to the local cache so UI remains instant on reload
         try {
             Storage.set(APP_KEYS.ATTENDANCE, JSON.stringify({ ts: Date.now(), attendance: currentAttendanceData }));
@@ -816,6 +824,9 @@ function updateRowDisplay(index, percentage, skippable) {
 }
 
 function displayAttendance(data) {
+    // Remove any in-chart message if present (we're about to render the chart)
+    hideInChartMessage();
+
     if (!data || !data.attendance || data.attendance.length === 0) {
         resultDiv.innerHTML = "<p>No attendance data available.</p>";
         return;
@@ -932,18 +943,6 @@ function updateUIForLoggedInState() {
     if (howBox) { const hasSavedData = Storage.get(APP_KEYS.CREDENTIALS) || Storage.get(APP_KEYS.THRESHOLD); howBox.style.display = (isLoggedIn || hasSavedData) ? 'none' : 'block'; }
     if (!isLoggedIn) { resultDiv.innerHTML = ''; }
 
-    // If the form is hidden (no login fields visible) and we don't already have results
-    try {
-        const formEl = document.querySelector('.form-wrapper');
-        const resultEmpty = !resultDiv || resultDiv.innerHTML.trim() === '';
-        const formHidden = !formEl || getComputedStyle(formEl).display === 'none';
-        if (formHidden && resultEmpty && !isProcessing && !stage2Shown) {
-            // show loader immediately but don't await
-            showStage2Loader().catch(() => { });
-        }
-    } catch (e) {
-        // ignore any errors from computed style
-    }
 }
 
 
@@ -977,6 +976,14 @@ async function fetchAttendance(srn, password, batchId = null, background = false
     if (isProcessing) { logEvent('fetch.in_progress', {}, 'error'); return; }
     if (isOffline) { logEvent('network.offline_fetch_blocked', {}, 'error'); return; }
     try {
+        // Show a subtle navbar spinner for both foreground and background fetches
+        showNavbarSpinner();
+
+        // If no chart exists AND there is no cached attendance, show an in-chart message so the user sees activity
+        if (!document.getElementById('attendanceChart') && !cachedAttendanceData && !Storage.get(APP_KEYS.ATTENDANCE)) {
+            showInChartMessage('Fetching your attendance data...');
+        }
+
         // For background fetches, keep the UI intact and avoid global loaders
         if (!background) {
             // Ensure button shows fetch state
@@ -1036,6 +1043,8 @@ async function fetchAttendance(srn, password, batchId = null, background = false
             Auth.clear();
         }
     } finally {
+        hideNavbarSpinner();
+        hideInChartMessage();
         if (!background) setLoadingState(false);
         isProcessing = false;
         clearSubmitMode();
@@ -1125,13 +1134,11 @@ async function handleAttendanceSubmit(srn, password, selectedBatchId) {
     // Stage 1 -> Stage 2: fade out login and show loader immediately below navbar
     const formWrapper = document.querySelector('.form-wrapper');
     await fadeOutElement(formWrapper, 220);
-    await showStage2Loader();
 
     // Fetch and then reveal results
     await fetchAttendance(srn, password, selectedBatchId || null);
     // Save credentials including batch_id
     Auth.save(srn, password, selectedBatchId);
-    await showStage3Result();
     setSubmitState(false);
 }
 srnInput.addEventListener('input', checkSRNValidity);
@@ -1221,8 +1228,7 @@ if (thresholdDisplay) {
     }
 
     if (hasSavedCredentials && !cachedAttendanceData) {
-        // only show global loading when there is no cached UI to display
-        setLoadingState(true);
+        // No interstitial loader — do not enable a global loading overlay here.
     }
 
     if (hasSavedCredentials) {
@@ -1244,20 +1250,15 @@ if (thresholdDisplay) {
 
                 // If we already displayed cached data, fetch in background and update the chart when done.
                 if (cachedAttendanceData) {
-                    // background fetch — do not show the interstitial loader
                     if (Auth.credentials.srn && Auth.credentials.password) {
                         fetchAttendance(Auth.credentials.srn, Auth.credentials.password, Auth.credentials.batch_id, true).catch(() => { /* ignore background errors */ });
                     }
                 } else {
-                    // no cached data — show loader and fetch normally
-                    await showStage2Loader();
                     if (Auth.credentials.srn && Auth.credentials.password) {
                         await fetchAttendance(Auth.credentials.srn, Auth.credentials.password, Auth.credentials.batch_id);
-                        await showStage3Result();
                     }
                 }
             } catch (e) {
-                // fallback to default UI if anything fails
                 updateUIForLoggedInState();
             }
         } else {

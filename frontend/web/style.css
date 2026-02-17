@@ -273,6 +273,63 @@ body {
     font-size: 0.75rem;
 }
 
+/* Prominent animated spinner shown in navbar during background/auto fetches */
+.navbar-spinner {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.12);
+    border-top-color: var(--primary);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.06);
+    position: relative;
+    transform-origin: center;
+    animation: navbar-rotate 0.9s linear infinite;
+    display: none;
+    margin-left: 0.6rem;
+}
+
+/* expanding ring for a subtle attention pulse */
+.navbar-spinner::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 18px;
+    height: 18px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.06);
+    opacity: 0;
+    animation: navbar-pulse 1.6s ease-out infinite;
+}
+
+@keyframes navbar-rotate {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes navbar-pulse {
+    0% {
+        transform: translate(-50%, -50%) scale(0.9);
+        opacity: 0.6;
+    }
+
+    60% {
+        transform: translate(-50%, -50%) scale(1.45);
+        opacity: 0.12;
+    }
+
+    100% {
+        transform: translate(-50%, -50%) scale(1.6);
+        opacity: 0;
+    }
+}
+
 /* Compact logout/button style to match cache-indicator size & position */
 .navbar .btn-secondary.compact {
     padding: 0.12rem 0.5rem;
@@ -825,6 +882,60 @@ input[type="range"]::-moz-range-thumb:hover {
     border-color: var(--text-secondary);
 }
 
+/* In-chart centered message shown when no chart is present (fetching state) */
+.in-chart-message {
+    min-height: 320px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: var(--space-6);
+    color: var(--text-secondary);
+    font-weight: 700;
+    font-size: 1.125rem;
+}
+
+.in-chart-message .dots {
+    margin-left: 0.5rem;
+    display: inline-block;
+}
+
+.in-chart-message .dot {
+    display: inline-block;
+    opacity: 0.25;
+    margin-left: 2px;
+    animation: dotPulse 1s infinite ease-in-out;
+}
+
+.in-chart-message .dot:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.in-chart-message .dot:nth-child(2) {
+    animation-delay: 0.15s;
+}
+
+.in-chart-message .dot:nth-child(3) {
+    animation-delay: 0.3s;
+}
+
+@keyframes dotPulse {
+    0% {
+        opacity: 0.25;
+        transform: translateY(0);
+    }
+
+    50% {
+        opacity: 1;
+        transform: translateY(-4px);
+    }
+
+    100% {
+        opacity: 0.25;
+        transform: translateY(0);
+    }
+}
+
 /* Table Styling */
 .table-container {
     overflow-x: auto;
@@ -1062,38 +1173,6 @@ table tbody tr:last-child td:last-child {
     pointer-events: auto;
 }
 
-/* Loading container when used *inside* the chart area */
-.loading-container.in-chart {
-    max-width: none;
-    width: 100%;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    padding: var(--space-6);
-    height: 400px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-start;
-    box-sizing: border-box;
-}
-
-.loading-container.in-chart .loading-text {
-    margin-top: 0.25rem;
-    margin-bottom: var(--space-4);
-    color: var(--text-secondary);
-    font-size: 1rem;
-}
-
-.loading-container.in-chart .skeleton-loader {
-    width: 100%;
-    padding: 0 var(--space-6);
-}
-
-.loading-container.in-chart .skeleton-chart-container {
-    height: calc(100% - 56px);
-    padding: var(--space-6);
-    margin-bottom: 0;
-}
 
 @keyframes slideIn {
     from {
@@ -1249,19 +1328,6 @@ table tbody tr:last-child td:last-child {
     animation-delay: 0.5s;
 }
 
-/* Loading Animation */
-.loading-container {
-    display: none;
-    width: 100%;
-    max-width: 520px;
-    margin: 0 auto;
-    text-align: center;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    padding: var(--space-8);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
 
 .loading-logs {
     margin-top: var(--space-6);
@@ -1294,49 +1360,6 @@ table tbody tr:last-child td:last-child {
     }
 }
 
-.loading-text {
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: var(--space-6);
-}
-
-.loading-dots {
-    width: 100%;
-    height: 3px;
-    background: var(--bg-tertiary);
-    border-radius: 2px;
-    overflow: hidden;
-    position: relative;
-}
-
-.loading-dot {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 100%;
-    width: 30%;
-    background: var(--primary);
-    animation: progressBar 1.5s ease-in-out infinite;
-}
-
-.loading-dot:nth-child(2),
-.loading-dot:nth-child(3),
-.loading-dot:nth-child(4),
-.loading-dot:nth-child(5) {
-    display: none;
-}
-
-@keyframes progressBar {
-    0% {
-        left: -30%;
-    }
-
-    100% {
-        left: 100%;
-    }
-}
-
 /* Loading State */
 body.loading .glass-card {
     opacity: 0.5;
@@ -1344,10 +1367,6 @@ body.loading .glass-card {
 }
 
 body.loading #result {
-    display: none;
-}
-
-body.loading .loading-container {
     display: block;
 }
 
@@ -1818,7 +1837,6 @@ body.loading .info-box {
 
     .navbar,
     .form-wrapper,
-    .loading-container,
     #notification-container,
     .logs-dropdown,
     .offline-indicator {
