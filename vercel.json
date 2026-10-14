@@ -1,18 +1,12 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "main.py",
-      "use": "@vercel/python"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60,
+      "includeFiles": "frontend/web/**"
     }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/main.py"
-    }
-  ],
+  },
   "env": {
-    "APP_MODULE": "main:app"
+    "LOG_FORMAT": "json"
   }
 }

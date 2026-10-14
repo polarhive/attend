@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.0
+      - name: install deps
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run --frozen ruff check main.py api tests
+      - name: Format
+        run: uv run --frozen ruff format --check main.py api tests
+      - name: Type check (pyright, strict)
+        run: uvx pyright --pythonpath .venv/bin/python
+      - name: Tests
+        run: uv run --frozen pytest -q

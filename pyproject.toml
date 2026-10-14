@@ -6,10 +6,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.116.1",
-    "requests>=2.32.4",
     "beautifulsoup4>=4.13.4",
     "python-dotenv>=1.1.1",
     "aiohttp>=3.13.1",
+    "yarl>=1.9",
     "matplotlib>=3.10.7",
     "telebot>=0.0.5",
     "rjsmin>=1.2.5",
@@ -17,3 +17,20 @@ dependencies = [
     "colorama>=0.4.6",
     "uvicorn>=0.40.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+    "ruff>=0.8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+reportMissingModuleSource = false
+exclude = ["frontend/telegram"]

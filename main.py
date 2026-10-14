@@ -1,50 +1,102 @@
 #!/usr/bin/env python3
-"""
-Main entrypoint for the PESU Attendance Tracker.
+"""PESU Attendance Tracker
 
 Run with environment toggles to choose which components start:
- - ENABLE_BACKEND_API: start API (defaults to true)
- - ENABLE_BACKEND_WEB: mount & serve static frontend (defaults to true)
- - ENABLE_BACKEND_TELEGRAM: launch the telegram bot as a subprocess (defaults to false)
+- ``ENABLE_BACKEND_API``: start the API (defaults to true).
+- ``ENABLE_BACKEND_WEB``: mount and serve the static frontend (defaults to true).
+- ``ENABLE_BACKEND_TELEGRAM``: launch the Telegram bot as a subprocess
+  (defaults to false).
 
 Examples:
-    # Run API and bot, but do not serve frontend
-    export ENABLE_BACKEND_WEB=false
-    export ENABLE_BACKEND_TELEGRAM=true
-    uv run main.py
+    Run API and bot, but do not serve the frontend:
+    .. code-block:: console
+        $ export ENABLE_BACKEND_WEB=false
+        $ export ENABLE_BACKEND_TELEGRAM=true
+        $ uv run main.py
 """
-import colorama
-from colorama import Fore, Style
 
-import uvicorn
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin, quote, urlencode
-from fastapi import FastAPI, APIRouter, HTTPException, status, Body
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.middleware.gzip import GZipMiddleware
-from dataclasses import dataclass
-import subprocess
+from __future__ import annotations
+
+import argparse
 import atexit
-import sys
-from typing import Dict, Any, Optional, Union, List
-import os
-import time
 import json
 import logging
-from pathlib import Path
+import os
 import re
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
+from urllib.parse import urljoin
+
+import aiohttp
+import colorama
+import uvicorn
+from bs4 import BeautifulSoup, Tag
+from colorama import Fore, Style
+from dotenv import load_dotenv
+from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from yarl import URL
+
+REQUEST_TIMEOUT_SECONDS_DEFAULT = 15
+IMMUTABLE_JS_CACHE_CONTROL = "public, max-age=31536000, immutable"
+FRONTEND_WEB_DIR = "frontend/web"
+FRONTEND_DISABLED_DETAILS = (
+    "Frontend disabled. Set ENABLE_BACKEND_WEB=true to enable serving the web frontend."
+)
+
+REPO_ROOT = Path(__file__).resolve().parent
+
+__all__ = [
+    "APIResponse",
+    "AppSettings",
+    "AttendanceRequest",
+    "AttendanceScrapingError",
+    "AuthenticationError",
+    "ConfigurationError",
+    "MappingsConfig",
+    "MappingsData",
+    "PESUAttendanceScraper",
+    "SemesterRequest",
+    "app",
+    "app_log",
+    "app_logger",
+    "fetch_student_attendance",
+    "format_attendance_data",
+    "load_app_settings",
+    "load_mappings_config",
+    "mappings",
+    "process_attendance_task",
+    "run",
+    "settings",
+    "setup_logger",
+]
 
 
 class APIResponse:
-    """Standardized API response wrapper for all clients (web, bot, CLI, etc.)"""
+    """Standardized API response envelope for all clients (web, bot, CLI)."""
 
     @staticmethod
     def success(
         data: Any, code: str = "success", message: str = "Operation successful"
-    ) -> Dict[str, Any]:
-        """Return standardized success response"""
+    ) -> dict[str, Any]:
+        """Build a standardized success payload.
+
+        Args:
+            data: JSON-serializable response payload.
+            code: Machine-readable status code.
+            message: Human-readable summary.
+
+        Returns:
+            Success envelope with ``success=True`` and a timestamp.
+        """
         return {
             "success": True,
             "code": code,
@@ -56,8 +108,18 @@ class APIResponse:
     @staticmethod
     def error(
         error_type: str, details: str, code: str = "error", status_code: int = 400
-    ) -> tuple[Dict[str, Any], int]:
-        """Return standardized error response with HTTP status"""
+    ) -> tuple[dict[str, Any], int]:
+        """Build a standardized error payload with an HTTP status.
+
+        Args:
+            error_type: Short error category (e.g. ``"AuthenticationError"``).
+            details: Human-readable explanation of the failure.
+            code: Machine-readable error code.
+            status_code: HTTP status code to return alongside the payload.
+
+        Returns:
+            Tuple of (error envelope, HTTP status code).
+        """
         response = {
             "success": False,
             "code": code,
@@ -71,34 +133,75 @@ class APIResponse:
         return response, status_code
 
 
-# ============================================================================
-# CONFIGURATION AND SETTINGS
-# ============================================================================
+def http_error(
+    error_type: str, details: str, code: str, status_code: int
+) -> HTTPException:
+    """Build an :class:`HTTPException` carrying a standardized error payload.
+
+    Args:
+        error_type: Short error category.
+        details: Human-readable explanation of the failure.
+        code: Machine-readable error code.
+        status_code: HTTP status code for the response.
+
+    Returns:
+        Configured ``HTTPException`` whose ``detail`` holds the envelope.
+    """
+    payload, status = APIResponse.error(
+        error_type=error_type, details=details, code=code, status_code=status_code
+    )
+    return HTTPException(status_code=status, detail=payload)
 
 
 class ConfigurationError(Exception):
     """Raised when configuration loading or validation fails."""
 
-    pass
 
-
-@dataclass
+@dataclass(frozen=True)
 class MappingsData:
+    """Resolved scraper mapping values for a single student branch.
+
+    Attributes:
+        controller_mode: Controller mode expected by the PESU admin endpoint.
+        action_type: Action type expected by the PESU admin endpoint.
+        menu_id: Menu id expected by the PESU admin endpoint.
+        subject_mapping: Mapping of raw subject codes to display names.
+    """
+
     controller_mode: int
     action_type: int
     menu_id: int
-    subject_mapping: Dict[str, str]
+    subject_mapping: dict[str, str] = field(default_factory=dict[str, str])
 
 
 class MappingsConfig:
-    def __init__(self, config: Dict[str, Any]):
-        self.CONTROLLER_MODE = config.get("CONTROLLER_MODE")
-        self.ACTION_TYPE = config.get("ACTION_TYPE")
-        self.MENU_ID = config.get("MENU_ID")
-        self.SUBJECT_MAPPING = config.get("SUBJECT_MAPPING", {})
+    """Wrapper around the raw ``mapping.json`` contents.
+
+    Args:
+        config: Parsed JSON mapping of the ``mapping.json`` file.
+
+    Raises:
+        ConfigurationError: If a required key is missing or mistyped.
+    """
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.CONTROLLER_MODE: int = _require_int(config, "CONTROLLER_MODE")
+        self.ACTION_TYPE: int = _require_int(config, "ACTION_TYPE")
+        self.MENU_ID: int = _require_int(config, "MENU_ID")
+        self.SUBJECT_MAPPING: dict[str, str] = _require_str_map(
+            config, "SUBJECT_MAPPING"
+        )
 
     def get_branch_config(self, srn: str) -> MappingsData:
-        # Return default config since batch mappings are handled dynamically
+        """Resolve the mapping values for a student SRN.
+
+        Args:
+            srn: Ignored. A single mapping applies to all branches. The
+                parameter remains for a per-branch signature.
+
+        Returns:
+            Resolved :class:`MappingsData` for the branch.
+        """
         return MappingsData(
             controller_mode=self.CONTROLLER_MODE,
             action_type=self.ACTION_TYPE,
@@ -107,274 +210,526 @@ class MappingsConfig:
         )
 
 
-class AppSettings:
-    def __init__(self):
-        try:
-            from dotenv import load_dotenv
-            from pathlib import Path
+def _require_int(config: dict[str, Any], key: str) -> int:
+    """Extract a required integer value from a raw config mapping.
 
-            # Load .env.local if it exists, otherwise fall back to .env
+    Args:
+        config: Raw parsed JSON mapping.
+        key: Key to look up.
+
+    Returns:
+        The integer value.
+
+    Raises:
+        ConfigurationError: If the key is missing or not an integer.
+    """
+    value = config.get(key)
+    # NOTE: `bool` subclasses `int`, so exclude it explicitly.
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigurationError(f"mapping.json must define integer {key!r}.")
+    return value
+
+
+def _require_str_map(config: dict[str, Any], key: str) -> dict[str, str]:
+    """Extract an optional string-to-string mapping from a raw config mapping.
+
+    Args:
+        config: Raw parsed JSON mapping.
+        key: Key to look up.
+
+    Returns:
+        The mapping with keys and values coerced via :func:`str`. The result
+        is empty when the key is absent.
+
+    Raises:
+        ConfigurationError: If the key is present but not a mapping.
+    """
+    value: Any = config.get(key, {}) or {}
+    if not isinstance(value, dict):
+        raise ConfigurationError(f"mapping.json key {key!r} must be a mapping.")
+    mapping = cast("dict[Any, Any]", value)
+    return {str(item_key): str(item_value) for item_key, item_value in mapping.items()}
+
+
+def _env_bool(name: str, default: str = "false") -> bool:
+    """Parse a boolean environment variable.
+
+    Args:
+        name: Environment variable name.
+        default: Fallback string value when the variable is unset.
+
+    Returns:
+        True for ``1``/``true``/``yes`` (case-insensitive), else False.
+    """
+    return os.getenv(name, default).lower() in ("1", "true", "yes")
+
+
+class AppSettings:
+    """Runtime settings sourced from environment variables.
+
+    Attributes:
+        PORT: Port the API server listens on.
+        LOG_LEVEL: Logging verbosity name (e.g. ``"INFO"``).
+        DEBUG: Whether uvicorn auto-reload is enabled.
+        REQUEST_TIMEOUT_SECONDS: Reserved timeout budget for outbound calls.
+        ENABLE_BACKEND_API: Whether to start the API server.
+        ENABLE_BACKEND_WEB: Whether to serve the static frontend.
+        ENABLE_BACKEND_TELEGRAM: Whether to launch the Telegram bot subprocess.
+    """
+
+    def __init__(self) -> None:
+        try:
             if Path(".env.local").exists():
                 load_dotenv(".env.local")
             else:
                 load_dotenv()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - missing .env falls back to os.environ
             pass
 
-        self.PORT = int(os.getenv("PORT", 10000))
-        self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-        self.DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
-        self.REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 5))
-        # Backend feature toggles
-        self.ENABLE_BACKEND_API = os.getenv("ENABLE_BACKEND_API", "true").lower() in (
-            "1",
-            "true",
-            "yes",
+        self.PORT: int = int(os.getenv("PORT", "10000"))
+        self.LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+        self.DEBUG: bool = _env_bool("DEBUG", "false")
+        self.REQUEST_TIMEOUT_SECONDS: int = int(
+            os.getenv("REQUEST_TIMEOUT_SECONDS", "5")
         )
-        self.ENABLE_BACKEND_WEB = os.getenv("ENABLE_BACKEND_WEB", "true").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-        self.ENABLE_BACKEND_TELEGRAM = os.getenv(
+        self.ENABLE_BACKEND_API: bool = _env_bool("ENABLE_BACKEND_API", "true")
+        self.ENABLE_BACKEND_WEB: bool = _env_bool("ENABLE_BACKEND_WEB", "true")
+        self.ENABLE_BACKEND_TELEGRAM: bool = _env_bool(
             "ENABLE_BACKEND_TELEGRAM", "false"
-        ).lower() in ("1", "true", "yes")
+        )
 
 
-def load_mappings_config() -> MappingsConfig:
-    repo_root = Path(__file__).resolve().parent
-    web_config = repo_root / "frontend" / "web" / "mapping.json"
+def load_mappings_config(config_path: Path | None = None) -> MappingsConfig:
+    """Load and validate the ``mapping.json`` configuration file.
+
+    Args:
+        config_path: Explicit path to ``mapping.json``. Defaults to
+            ``<repo>/frontend/web/mapping.json``.
+
+    Returns:
+        Parsed :class:`MappingsConfig`.
+
+    Raises:
+        ConfigurationError: If the file is missing, is not valid JSON, or
+            cannot be read.
+    """
+    path = config_path or (REPO_ROOT / FRONTEND_WEB_DIR / "mapping.json")
 
     try:
-        if not web_config.exists():
-            raise ConfigurationError(f"mapping.json file not found at: {web_config}.")
+        if not path.exists():
+            raise ConfigurationError(f"mapping.json file not found at: {path}.")
 
         try:
-            with web_config.open("r", encoding="utf-8") as f:
-                config_data = json.load(f)
+            with path.open("r", encoding="utf-8") as handle:
+                config_data = json.load(handle)
         except json.JSONDecodeError as error:
             raise ConfigurationError(
                 f"Invalid JSON format in configuration file: {error}"
-            )
+            ) from error
 
         return MappingsConfig(config_data)
 
     except ConfigurationError:
         raise
     except Exception as error:
-        raise ConfigurationError(f"Failed to load configuration: {error}")
+        raise ConfigurationError(f"Failed to load configuration: {error}") from error
 
 
 def load_app_settings() -> AppSettings:
+    """Load application settings from the environment.
+
+    Returns:
+        Populated :class:`AppSettings`.
+
+    Raises:
+        ConfigurationError: If settings cannot be constructed.
+    """
     try:
         return AppSettings()
     except Exception as error:
-        raise ConfigurationError(f"Failed to load application settings: {error}")
+        raise ConfigurationError(
+            f"Failed to load application settings: {error}"
+        ) from error
 
 
-# ============================================================================
-# LOGGING SETUP
-# ============================================================================
+class TextFormatter(logging.Formatter):
+    """Fixed-format log lines: UTC timestamp, level, logger name, message.
+
+    Args:
+        color: Wrap the level name and message in ANSI colors. Enable color
+            for TTY sinks only. Never enable it for piped or collected output.
+    """
+
+    def __init__(self, *, color: bool) -> None:
+        super().__init__(
+            "%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%SZ",
+        )
+        self.converter = time.gmtime
+        self._color = color
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Format a record, optionally colorized, without mutating it.
+
+        Args:
+            record: Log record to format.
+
+        Returns:
+            Formatted log line.
+        """
+        if not self._color:
+            return super().format(record)
+        if record.levelno == logging.DEBUG:
+            color = Fore.CYAN
+        elif record.levelno == logging.INFO:
+            color = Fore.GREEN
+        elif record.levelno == logging.WARNING:
+            color = Fore.YELLOW
+        elif record.levelno == logging.ERROR:
+            color = Fore.RED
+        else:
+            color = Fore.WHITE
+        # Copy the record so repeated formatting does not stack color codes.
+        record = logging.makeLogRecord(record.__dict__.copy())
+        record.levelname = f"{color}{record.levelname}{Style.RESET_ALL}"
+        record.msg = f"{color}{record.getMessage()}{Style.RESET_ALL}"
+        record.args = ()
+        return super().format(record)
 
 
-def setup_logger(name=None, level=None, format_str=None):
-    """Set up a logger with console output."""
-    # Initialize colorama for colored output
-    colorama.init()
+class JsonFormatter(logging.Formatter):
+    """Single-line JSON log records for collectors and production sinks."""
 
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    default_format = "%(levelname)s: %(message)s"
+    def format(self, record: logging.LogRecord) -> str:
+        """Serialize a record to a JSON object with UTC timestamp.
 
-    logger = logging.getLogger(name)
-    logger.setLevel(level or log_level)
+        Args:
+            record: Log record to format.
 
-    # Clear existing handlers to avoid duplicates
+        Returns:
+            JSON-encoded log line. Carries an ``event`` field when the
+            record was emitted with one (see :func:`app_log`), and an
+            ``exc`` field when exception info is attached.
+        """
+        payload: dict[str, Any] = {
+            "ts": datetime.now(UTC)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        event = getattr(record, "event", None)
+        if event is not None:
+            payload["event"] = event
+        if record.exc_info is not None and record.exc_info[0] is not None:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def _select_log_format() -> tuple[bool, bool]:
+    """Decide the log sink format from ``LOG_FORMAT`` and the stderr TTY state.
+
+    Returns:
+        Tuple of (use_json, use_color). ``LOG_FORMAT=json`` forces JSON.
+        ``LOG_FORMAT=text`` forces plain text. ``LOG_FORMAT=auto``
+        (default) uses JSON off-TTY and colorized text on TTY. Color is
+        never selected for non-TTY sinks.
+    """
+    mode = os.getenv("LOG_FORMAT", "auto").lower()
+    use_json = mode == "json" or (mode == "auto" and not sys.stderr.isatty())
+    use_color = not use_json and mode != "text" and sys.stderr.isatty()
+    return use_json, use_color
+
+
+def setup_logger(
+    name: str | None = None,
+    level: str | None = None,
+) -> logging.Logger:
+    """Configure and return the application logger.
+
+    Every line carries a UTC ISO-8601 timestamp, level, logger name, and
+    message. Format selection: ``LOG_FORMAT=json`` forces JSON lines.
+    ``LOG_FORMAT=text`` forces human-readable lines.
+    ``LOG_FORMAT=auto`` (default) uses JSON when the sink is not a TTY and
+    colorized text otherwise. Colors are never emitted to non-TTY sinks.
+
+    Args:
+        name: Logger name. Defaults to ``"attend"``.
+        level: Log level name (e.g. ``"DEBUG"``). Defaults to ``LOG_LEVEL``.
+
+    Returns:
+        Logger with exactly one stderr handler. Propagation is disabled.
+
+    Raises:
+        ValueError: If the level name is unknown.
+    """
+    log_level = (level or os.getenv("LOG_LEVEL", "INFO")).upper()
+    logger = logging.getLogger(name if name is not None else "attend")
+    logger.setLevel(log_level)
+
+    # Clear existing handlers to avoid duplicates on reload.
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    # Colored formatter
-    class ColoredFormatter(logging.Formatter):
-        def format(self, record):
-            if record.levelno == logging.DEBUG:
-                color = Fore.CYAN
-            elif record.levelno == logging.INFO:
-                color = Fore.GREEN
-            elif record.levelno == logging.WARNING:
-                color = Fore.YELLOW
-            elif record.levelno == logging.ERROR:
-                color = Fore.RED
-            else:
-                color = Fore.WHITE
-            record.levelname = f"{color}{record.levelname}{Style.RESET_ALL}"
-            record.message = f"{color}{record.getMessage()}{Style.RESET_ALL}"
-            return super().format(record)
+    stream = sys.stderr
+    use_json, use_color = _select_log_format()
+    if use_color and os.name == "nt":
+        colorama.init()
 
-    # Add console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(ColoredFormatter(format_str or default_format))
-    logger.addHandler(console_handler)
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(
+        JsonFormatter() if use_json else TextFormatter(color=use_color)
+    )
+    logger.addHandler(handler)
 
-    # Prevent propagation to root to avoid duplicate logs
+    # Prevent propagation to root to avoid duplicate logs.
     logger.propagate = False
 
     return logger
 
 
-# ============================================================================
-# PESU ACADEMY SCRAPER
-# ============================================================================
-
-
 class AuthenticationError(Exception):
     """Raised when authentication with PESU Academy fails."""
-
-    pass
 
 
 class AttendanceScrapingError(Exception):
     """Raised when attendance data scraping encounters an error."""
 
-    pass
-
 
 class PESUAttendanceScraper:
+    """Scrapes attendance data from PESU Academy for a single student.
+
+    Args:
+        username: PESU Academy username (SRN).
+        password: PESU Academy password.
+        batch_id: Optional explicit batch class id. When omitted, batch ids
+            are auto-discovered from the semesters endpoint at runtime.
+        mappings: Optional pre-loaded :class:`MappingsConfig`. Falls back to
+            the module-level ``mappings`` for backwards compatibility.
+        logger: Optional logger used for debug/info output.
+    """
+
     BASE_URL = "https://www.pesuacademy.com/Academy"
 
     def __init__(
-        self, username: str, password: str, batch_id: Optional[int] = None
+        self,
+        username: str,
+        password: str,
+        batch_id: int | None = None,
+        mappings: MappingsConfig | None = None,
+        logger: logging.Logger | None = None,
     ) -> None:
-        self.session = requests.Session()
-        # Provide browser-like defaults so the site responds with the same CSRF & cookies
-        self.session.headers.update(
-            {
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            }
-        )
+        # The HTTP session is created lazily on first use so instances can be
+        # constructed outside a running event loop.
+        self._session: aiohttp.ClientSession | None = None
         self.username = username
         self.password = password
+        self.logger = logger
+
+        config = mappings if mappings is not None else globals().get("mappings")
+        if config is None:  # pragma: no cover - defensive fallback
+            config = load_mappings_config()
 
         try:
-            # Load and configure branch-specific settings using new config system
-            branch_config = mappings.get_branch_config(username)
+            branch_config = config.get_branch_config(username)
             self.controller_mode = branch_config.controller_mode
             self.action_type = branch_config.action_type
             self.menu_id = branch_config.menu_id
             self.subject_mapping = branch_config.subject_mapping
 
-            self.batch_class_ids = None
-            # If a specific batch_id is provided, use it instead
+            self.batch_class_ids: int | list[int] | None = None
             if batch_id is not None:
                 self.batch_class_ids = [batch_id]
 
-            # Track whether batchClassId(s) were auto-discovered at runtime.
-            self._auto_discovered_batch_ids: Optional[List[int]] = None
-            self.sem_texts: Optional[Dict[int, str]] = None
+            self._auto_discovered_batch_ids: list[int] | None = None
+            self.sem_texts: dict[int, str] | None = None
 
-            # Extract branch prefix from username for logging
-            # Derive a human-friendly branch prefix for logging
+            # SRN prefix for log messages; the full SRN is never logged.
             self.branch_prefix = username[:10]
 
-        except ValueError as e:
-            raise ConfigurationError(f"Configuration error: {e}")
+        except ValueError as error:
+            raise ConfigurationError(f"Configuration error: {error}") from error
+
+    @property
+    def auto_discovered_batch_ids(self) -> list[int] | None:
+        """Batch ids auto-discovered from the semesters endpoint, if any.
+
+        Returns:
+            Discovered batch ids, or None when discovery has not run or
+            found nothing.
+        """
+        return self._auto_discovered_batch_ids
+
+    def _log_debug(self, message: str) -> None:
+        """Record message at DEBUG. Do nothing when no logger is set."""
+        if self.logger is not None:
+            self.logger.debug(message)
+
+    def _log_info(self, message: str) -> None:
+        """Record message at INFO. Do nothing when no logger is set."""
+        if self.logger is not None:
+            self.logger.info(message)
+
+    def _log_warning(self, message: str) -> None:
+        """Record message at WARNING. Do nothing when no logger is set."""
+        if self.logger is not None:
+            self.logger.warning(message)
+
+    def _log_error(self, message: str) -> None:
+        """Record message at ERROR. Do nothing when no logger is set."""
+        if self.logger is not None:
+            self.logger.error(message)
 
     def _extract_csrf_token(self, html_content: str) -> str:
-        """
-        Extract CSRF token from several possible locations:
-        - <input name="_csrf" value="...">
-        - <meta name="_csrf" content="..."> or common meta tokens
-        - inline JS patterns or UUID-like tokens
+        """Extract the CSRF token from a PESU Academy HTML page.
+
+        The token is searched in several locations, in order:
+
+        - ``<input name="_csrf" value="...">``
+        - ``<meta name="_csrf|csrf-token|csrf" content="...">``
+        - Inline JS assignments such as ``_csrf = 'uuid'``.
+        - Any UUID-like string as a last resort.
+
+        Args:
+            html_content: Raw HTML of the page.
+
+        Returns:
+            The extracted CSRF token.
+
+        Raises:
+            AuthenticationError: If no token can be found.
         """
         soup = BeautifulSoup(html_content, "html.parser")
 
-        # 1) standard hidden input
         csrf_input = soup.find("input", {"name": "_csrf"})
         if csrf_input and csrf_input.get("value"):
-            return csrf_input.get("value")  # type: ignore
+            token = csrf_input.get("value")
+            assert isinstance(token, str)
+            return token
 
-        # 2) meta tags
         for meta_name in ("_csrf", "csrf-token", "csrf"):
-            m = soup.find("meta", {"name": meta_name})
-            if m and m.get("content"):
-                return m.get("content")  # type: ignore
+            meta = soup.find("meta", {"name": meta_name})
+            if meta and meta.get("content"):
+                token = meta.get("content")
+                assert isinstance(token, str)
+                return token
 
-        # 3) JS inline assignment e.g. _csrf = 'uuid' or "_csrf":"uuid"
-        m = re.search(
+        match = re.search(
             r"_csrf['\"]?\s*[:=]\s*['\"]([0-9a-fA-F-]{8,})['\"]", html_content
         )
-        if m:
-            return m.group(1)
+        if match:
+            return match.group(1)
 
-        # 4) fallback: any UUID in page (common CSRF format observed)
-        m2 = re.search(
+        fallback = re.search(
             r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
             html_content,
-            re.I,
+            re.IGNORECASE,
         )
-        if m2:
-            return m2.group(1)
+        if fallback:
+            return fallback.group(1)
 
         raise AuthenticationError("CSRF token not found in response")
 
-    def login(self) -> None:
-        app_log("auth.initiate", "Initiating authentication process")
+    def _session_csrf(self) -> str | None:
+        """Return the CSRF token stored in session cookies, if any.
+
+        Returns:
+            Cookie CSRF token or None when absent.
+        """
+        cookies = self._cookie_dict()
+        return cookies.get("XSRF-TOKEN") or cookies.get("CSRF-TOKEN")
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Return the shared HTTP session, creating it lazily on first use.
+
+        Returns:
+            The active :class:`aiohttp.ClientSession`.
+        """
+        if self._session is None or self._session.closed:
+            # Accept header required to receive the standard login pages.
+            self._session = aiohttp.ClientSession(
+                headers={
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+                timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SECONDS_DEFAULT),
+            )
+        return self._session
+
+    def _cookie_dict(self) -> dict[str, str]:
+        """Return the session cookies as a plain mapping.
+
+        Returns:
+            Cookie name to value mapping (empty when no session exists yet).
+        """
+        if self._session is None:
+            return {}
+        jar = self._session.cookie_jar.filter_cookies(URL(self.BASE_URL))
+        return {name: morsel.value for name, morsel in jar.items()}
+
+    async def login(self) -> None:
+        """Authenticate with PESU Academy and prepare the session.
+
+        Discovers batch class ids from the semesters endpoint when none were
+        provided explicitly.
+
+        Raises:
+            AuthenticationError: If any step of the login flow fails.
+        """
+        self._log_info("Initiating authentication process")
 
         try:
-            # GET initial page (login landing) and gather cookies + form
+            session = await self._get_session()
             login_page_url = f"{self.BASE_URL}/"
-            r0 = self.session.get(login_page_url, allow_redirects=True, timeout=15)
-            r0.raise_for_status()
+            async with session.get(login_page_url) as landing_response:
+                landing_response.raise_for_status()
+                landing_html = await landing_response.text()
+                landing_url = str(landing_response.url)
 
-            soup = BeautifulSoup(r0.text, "html.parser")
-            # Find the login form (heuristic: form containing j_username or username field)
-            form = None
-            for f in soup.find_all("form"):
-                if f.find("input", {"name": "j_username"}) or f.find(
+            soup = BeautifulSoup(landing_html, "html.parser")
+            form: Tag | None = None
+            for candidate in soup.find_all("form"):
+                if candidate.find("input", {"name": "j_username"}) or candidate.find(
                     "input", {"name": "username"}
                 ):
-                    form = f
+                    form = candidate
                     break
 
-            action = None
-            if form and form.get("action"):
-                action = form.get("action")
-            else:
-                action = "/j_spring_security_check"
-
+            action = (
+                form.get("action")
+                if form is not None and form.get("action")
+                else "/j_spring_security_check"
+            )
+            assert isinstance(action, str)
             if action.startswith("http"):
                 login_url = action
             else:
                 login_url = urljoin(self.BASE_URL + "/", action.lstrip("/"))
 
-            # Gather form hidden inputs (preserve any extra required fields)
-            form_inputs = {}
-            if form:
-                for inp in form.find_all("input"):
-                    name = inp.get("name")
-                    if not name:
+            form_inputs: dict[str, str] = {}
+            if form is not None:
+                for field_input in form.find_all("input"):
+                    raw_name = field_input.get("name")
+                    if not raw_name or raw_name in ("j_username", "j_password"):
                         continue
-                    if name in ("j_username", "j_password"):
-                        continue
-                    form_inputs[name] = inp.get("value", "")
+                    # BeautifulSoup types attribute values loosely, so coerce them to str.
+                    form_inputs[str(raw_name)] = str(field_input.get("value", ""))
 
-            # Determine CSRF to use for login (form value > page token > cookie > existing)
             form_csrf = form_inputs.get("_csrf")
-            page_csrf = None
+            page_csrf: str | None = None
             try:
-                page_csrf = self._extract_csrf_token(r0.text)
+                page_csrf = self._extract_csrf_token(landing_html)
             except AuthenticationError:
                 page_csrf = None
 
             if form_csrf:
-                csrf_token = form_csrf
+                csrf_token: str | None = form_csrf
                 csrf_source = "form"
             elif page_csrf:
                 csrf_token = page_csrf
                 csrf_source = "html"
             else:
-                # cookie-based fallback
-                csrf_token = self.session.cookies.get(
-                    "XSRF-TOKEN"
-                ) or self.session.cookies.get("CSRF-TOKEN")
+                csrf_token = self._session_csrf()
                 csrf_source = "cookie" if csrf_token else None
 
             if not csrf_token:
@@ -392,45 +747,26 @@ class PESUAttendanceScraper:
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Origin": "https://www.pesuacademy.com",
-                "Referer": r0.url,
+                "Referer": landing_url,
                 "Sec-GPC": "1",
             }
 
-            app_logger.debug(f"Posting to {login_url} with csrf source={csrf_source}")
-            resp = self.session.post(
-                login_url,
-                data=login_payload,
-                headers=headers,
-                allow_redirects=True,
-                timeout=15,
-            )
+            self._log_debug(f"Posting to {login_url} with csrf source={csrf_source}")
+            async with session.post(
+                login_url, data=login_payload, headers=headers
+            ) as response:
+                login_status = response.status
+                login_url_final = str(response.url)
+                login_body = await response.text()
 
-            app_logger.debug(
-                f"Login POST status={getattr(resp, 'status_code', None)} url={getattr(resp, 'url', None)}"
-            )
-            app_logger.debug(
-                f"Session cookies after login: {self.session.cookies.get_dict()}"
-            )
+            self._log_debug(f"Login POST status={login_status} url={login_url_final}")
+            self._log_debug(f"Session cookies after login: {self._cookie_dict()}")
 
-            # Heuristic: server sometimes redirects to http landing (which returns 404); if final url uses http, try https equivalent
-            final_resp = resp
-            try:
-                if getattr(resp, "url", "").startswith("http://"):
-                    alt = "https://" + resp.url.split("://", 1)[1]
-                    app_logger.debug(f"Retrying landing URL with https: {alt}")
-                    landing_resp = self.session.get(
-                        alt, allow_redirects=True, timeout=15
-                    )
-                    app_logger.debug(
-                        f"Landing fetch status: {getattr(landing_resp, 'status_code', None)} url={getattr(landing_resp, 'url', None)}"
-                    )
-                    if landing_resp.status_code < 400:
-                        final_resp = landing_resp
-            except Exception:
-                pass
-
-            # Basic detection of failed login via presence of login form or error messages
-            final_body = (final_resp.text or "").lower()
+            fallback_html = await self._fetch_https_fallback_html(login_url_final)
+            final_body = (
+                fallback_html if fallback_html is not None else login_body
+            ) or ""
+            final_body = final_body.lower()
             if (
                 "j_username" in final_body
                 or "j_spring_security_check" in final_body
@@ -440,135 +776,157 @@ class PESUAttendanceScraper:
                     "Authentication failed: login page or error detected after POST"
                 )
 
-            # Prepare profile context and obtain a ready-to-use CSRF token (reuse final response to avoid extra GET)
             try:
-                csrf_after = self._prepare_profile_context(initial_response=final_resp)
+                csrf_after = await self._prepare_profile_context(
+                    initial_html=fallback_html
+                    if fallback_html is not None
+                    else login_body
+                )
             except AuthenticationError:
-                # Fall back to cookie if preparation failed
-                csrf_after = self.session.cookies.get(
-                    "XSRF-TOKEN"
-                ) or self.session.cookies.get("CSRF-TOKEN")
+                csrf_after = self._session_csrf()
 
-            app_log("auth.success", "Authentication successful")
+            self._log_info("Authentication successful")
+            await self._ensure_batch_ids(csrf_after)
 
-            # If batch class IDs are not configured, attempt to auto-discover them
-            # from the semesters endpoint used by the profile page.
-            if not self.batch_class_ids:
-                try:
-                    ids, texts = self._fetch_semester_batch_ids(csrf_after)
-                    if ids:
-                        # Record that these were auto-discovered so the API can
-                        # surface a helpful suggestion to the user.
-                        self._auto_discovered_batch_ids = ids
-                        self.sem_texts = texts
+        except (TimeoutError, aiohttp.ClientError) as error:
+            raise AuthenticationError(
+                f"Network error during authentication: {error}"
+            ) from error
+        except AuthenticationError:
+            raise
+        except Exception as error:
+            raise AuthenticationError(f"Authentication failed: {error}") from error
 
-                        # Use a single value when only one option is found, else keep the list
-                        self.batch_class_ids = ids if len(ids) > 1 else ids[0]
-                        app_log(
-                            "mapping.auto_discovered",
-                            f"Auto-discovered batchClassId(s): {self.batch_class_ids}",
-                        )
-                except Exception as e:
-                    app_logger.debug(f"Auto-discovery of batchClassId failed: {e}")
+    async def _fetch_https_fallback_html(self, url: str) -> str | None:
+        """Fetch an ``http://`` landing URL over ``https://``.
 
-        except requests.RequestException as e:
-            raise AuthenticationError(f"Network error during authentication: {e}")
-        except Exception as e:
-            raise AuthenticationError(f"Authentication failed: {e}")
+        The server redirects some landing URLs to ``http``; the ``http``
+        variant 404s.
 
-    def _validate_authentication(self) -> None:
-        profile_url = f"{self.BASE_URL}/s/studentProfilePESU"
-        try:
-            profile_response = self.session.get(
-                profile_url, allow_redirects=True, timeout=15
-            )
-            app_logger.debug(
-                f"Validate profile fetch status={profile_response.status_code} url={profile_response.url}"
-            )
+        Args:
+            url: URL of the initial response.
 
-            if profile_response.status_code == 200:
-                body = profile_response.text.lower()
-                # Heuristics for successful login
-                if (
-                    "studentprofile" in body
-                    or "logout" in body
-                    or "/a/0" in profile_response.url
-                ):
-                    return
-                # Detect login form indicating failed auth
-                if re.search(r'name=["\']j_username["\']', body):
-                    raise AuthenticationError(
-                        "Authentication failed: login form detected after login"
-                    )
-                raise AuthenticationError(
-                    "Authentication failed: unexpected profile response"
-                )
-            elif profile_response.status_code in (301, 302):
-                raise AuthenticationError("Authentication failed: redirected to login")
-            else:
-                raise AuthenticationError(
-                    f"Authentication failed: HTTP {profile_response.status_code}"
-                )
-
-        except requests.RequestException as e:
-            raise AuthenticationError(f"Failed to validate authentication: {e}")
-
-    def logout(self) -> None:
-        try:
-            logout_url = f"{self.BASE_URL}/logout"
-            self.session.get(logout_url)
-            app_log("session.terminated", "Session terminated successfully")
-        except requests.RequestException as e:
-            app_logger.warning(f"Error during logout: {e}")
-
-    def _prepare_profile_context(
-        self, initial_response: Optional[requests.Response] = None
-    ) -> str:
+        Returns:
+            The HTTPS response body when its status is below 400,
+            otherwise None.
         """
-        Perform the minimal sequence of requests that prepare the student profile context on the server.
-        If `initial_response` is provided (e.g., the final response after login), it will be reused to
-        extract CSRF and avoid an extra profile GET. Returns the CSRF token to use for subsequent AJAX requests.
+        if not url.startswith("http://"):
+            return None
+        try:
+            session = await self._get_session()
+            alt = "https://" + url.split("://", 1)[1]
+            self._log_debug(f"Retrying landing URL with https: {alt}")
+            async with session.get(alt) as landing_response:
+                self._log_debug(
+                    f"Landing fetch status: {landing_response.status} "
+                    f"url={landing_response.url}"
+                )
+                if landing_response.status < 400:
+                    return await landing_response.text()
+        except (TimeoutError, aiohttp.ClientError):
+            pass
+        return None
+
+    async def _ensure_batch_ids(self, csrf_token: str | None) -> None:
+        """Auto-discover batch class ids when none are configured.
+
+        Args:
+            csrf_token: CSRF token for the semesters endpoint. Discovery is
+                skipped silently when falsy.
+        """
+        if self.batch_class_ids or not csrf_token:
+            return
+        try:
+            ids, texts = await self._fetch_semester_batch_ids(csrf_token)
+            if ids:
+                self._auto_discovered_batch_ids = ids
+                self.sem_texts = texts
+                self.batch_class_ids = ids if len(ids) > 1 else ids[0]
+                self._log_info(
+                    f"Auto-discovered batchClassId(s): {self.batch_class_ids}"
+                )
+        except Exception as error:  # noqa: BLE001 - failure leaves batch_class_ids unset
+            self._log_debug(f"Auto-discovery of batchClassId failed: {error}")
+
+    async def logout(self) -> None:
+        """Request server-side session termination.
+
+        :mod:`aiohttp` and timeout failures are logged at WARNING instead
+        of propagating.
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.BASE_URL}/logout"):
+                pass
+            self._log_info("Session terminated successfully")
+        except (TimeoutError, aiohttp.ClientError) as error:
+            self._log_warning(f"Error during logout: {error}")
+
+    async def close(self) -> None:
+        """Log out, then close the HTTP session and detach it.
+
+        The session reference is detached even if logout fails. Network
+        and timeout failures do not propagate beyond :meth:`logout`.
+        Anything else propagates after detachment.
+        """
+        try:
+            if self._session is not None:
+                await self.logout()
+        finally:
+            session, self._session = self._session, None
+            if session is not None and not session.closed:
+                await session.close()
+
+    async def _prepare_profile_context(self, initial_html: str | None = None) -> str:
+        """Prepare the student profile context on the server.
+
+        Args:
+            initial_html: Optional already-fetched profile page body to
+                reuse, avoiding an extra network call.
+
+        Returns:
+            CSRF token to use for subsequent AJAX requests.
+
+        Raises:
+            AuthenticationError: If no CSRF token is available.
         """
         profile_url = f"{self.BASE_URL}/s/studentProfilePESU"
+        session = await self._get_session()
 
-        # Reuse provided response to avoid an extra network call
-        if initial_response is not None:
-            r = initial_response
+        if initial_html is not None:
+            html = initial_html
         else:
             try:
-                r = self.session.get(profile_url, allow_redirects=True, timeout=15)
-                r.raise_for_status()
-            except requests.exceptions.HTTPError as e:
-                cookies = self.session.cookies.get_dict()
+                async with session.get(profile_url) as response:
+                    response.raise_for_status()
+                    html = await response.text()
+            except aiohttp.ClientResponseError as error:
+                cookies = self._cookie_dict()
                 if "JSESSIONID" in cookies or "SESSION" in cookies:
-                    app_logger.debug(
-                        "Fetching profile returned error but session cookie present; retrying once"
+                    self._log_debug(
+                        "Fetching profile returned error but session cookie is "
+                        "present. Retrying once."
                     )
-                    r = self.session.get(profile_url, allow_redirects=True, timeout=15)
-                    r.raise_for_status()
+                    async with session.get(profile_url) as response:
+                        response.raise_for_status()
+                        html = await response.text()
                 else:
-                    raise
+                    raise AuthenticationError(
+                        f"Failed to prepare profile context: {error}"
+                    ) from error
 
-        # Prefer HTML token found on the page, then cookie
         try:
-            html_csrf = self._extract_csrf_token(r.text)
+            html_csrf: str | None = self._extract_csrf_token(html)
         except AuthenticationError:
             html_csrf = None
 
-        cookie_csrf = self.session.cookies.get(
-            "XSRF-TOKEN"
-        ) or self.session.cookies.get("CSRF-TOKEN")
-
-        if html_csrf:
-            csrf_token = html_csrf
-        elif cookie_csrf:
-            csrf_token = cookie_csrf
-        else:
+        csrf_token = html_csrf or self._session_csrf()
+        if not csrf_token:
             raise AuthenticationError(
-                "Missing CSRF token before fetching profile; expected an HTML or cookie-based token."
+                "Missing CSRF token before fetching profile. "
+                "Expected an HTML or cookie-based token."
             )
 
-        # Prepare headers for AJAX-like requests
         headers = {
             "X-Requested-With": "XMLHttpRequest",
             "X-CSRF-Token": csrf_token,
@@ -576,27 +934,42 @@ class PESUAttendanceScraper:
             "Referer": profile_url,
         }
 
-        # Make a single best-effort preparatory request (semesters); avoid the heavier admin endpoint to reduce requests
         try:
-            r_sem = self.session.get(
+            async with session.get(
                 f"{self.BASE_URL}/s/studentProfile/getStudentSemestersPESU",
                 params={"_": int(time.time() * 1000)},
                 headers=headers,
-                timeout=15,
-            )
-            r_sem.raise_for_status()
-        except Exception:
-            app_logger.debug("Semesters fetch failed; continuing anyway")
+            ) as semesters_response:
+                semesters_response.raise_for_status()
+        except (TimeoutError, aiohttp.ClientError):
+            self._log_debug("Semesters fetch failed. Continuing anyway.")
 
         return csrf_token
 
-    def _fetch_semester_batch_ids(
-        self, csrf_token: str
-    ) -> tuple[Optional[List[int]], Optional[Dict[int, str]]]:
+    async def get_semester_options(self) -> dict[int, str] | None:
+        """Fetch available semesters as an id-to-label mapping.
+
+        Requires an authenticated session. Call :meth:`login` first.
+
+        Returns:
+            Mapping of batch id to semester label, or None when unavailable.
         """
-        Fetch semester options and return a list of `value` attributes found in
-        the <option> tags (e.g., batchClassId values). Returns None if nothing
-        can be discovered.
+        _, texts = await self._fetch_semester_batch_ids(
+            await self._prepare_profile_context()
+        )
+        return texts
+
+    async def _fetch_semester_batch_ids(
+        self, csrf_token: str
+    ) -> tuple[list[int] | None, dict[int, str] | None]:
+        """Fetch semester options and extract batch class ids.
+
+        Args:
+            csrf_token: CSRF token for the semesters endpoint.
+
+        Returns:
+            Tuple of (batch id list or None, id-to-label mapping or None).
+            The response may be HTML ``<option>`` tags or a JSON list.
         """
         url = f"{self.BASE_URL}/s/studentProfile/getStudentSemestersPESU"
         headers = {
@@ -606,128 +979,151 @@ class PESUAttendanceScraper:
             "Referer": f"{self.BASE_URL}/s/studentProfilePESU",
         }
         try:
-            resp = self.session.get(
-                url, params={"_": int(time.time() * 1000)}, headers=headers, timeout=15
-            )
-            resp.raise_for_status()
-            app_logger.debug(
-                f"Semester response content-type: {resp.headers.get('content-type')}"
-            )
-            soup = BeautifulSoup(resp.text, "html.parser")
+            session = await self._get_session()
+            async with session.get(
+                url,
+                params={"_": int(time.time() * 1000)},
+                headers=headers,
+            ) as response:
+                response.raise_for_status()
+                self._log_debug(
+                    "Semester response content-type: "
+                    f"{response.headers.get('content-type')}"
+                )
+                body = await response.text()
+            soup = BeautifulSoup(body, "html.parser")
             options = soup.find_all("option")
-            app_logger.debug(f"Found {len(options)} option tags in semester response")
-            values: List[int] = []
-            texts: Dict[int, str] = {}
+            self._log_debug(f"Found {len(options)} option tags in semester response")
+            values: list[int] = []
+            texts: dict[int, str] = {}
             if options:
                 for opt in options:
                     val = opt.get("value")
                     text = opt.get_text(strip=True)
-                    app_logger.debug(f"Option value: {val}, text: {text}")
-                    if val:
-                        try:
-                            # Strip quotes if present and convert to int
-                            clean_val = "".join(filter(str.isdigit, val))
-                            id_int = int(clean_val)
-                            values.append(id_int)
-                            texts[id_int] = text
-                            app_logger.debug(f"Parsed batch ID: {id_int}, text: {text}")
-                        except ValueError:
-                            app_logger.debug(f"Skipping invalid value: {val}")
-                            continue
+                    self._log_debug(f"Option value: {val}, text: {text}")
+                    batch_id = self._parse_batch_id(val)
+                    if batch_id is not None:
+                        values.append(batch_id)
+                        texts[batch_id] = text
             else:
-                # Perhaps it's JSON
+                # The endpoint sometimes returns JSON instead of HTML.
                 try:
-                    data = resp.json()
-                    app_log("semester.parsed", f"Parsed as JSON: {data}", "debug")
-                    if isinstance(data, list):
-                        for item in data:
-                            val = item.get("value")
-                            text = item.get("text", item.get("label", ""))
-                            if val:
-                                try:
-                                    clean_val = "".join(filter(str.isdigit, str(val)))
-                                    id_int = int(clean_val)
-                                    values.append(id_int)
-                                    texts[id_int] = text
-                                    app_logger.debug(
-                                        f"Parsed batch ID from JSON: {id_int}, text: {text}"
-                                    )
-                                except ValueError:
-                                    continue
-                except Exception as e:
-                    app_logger.debug(f"Could not parse as JSON: {e}")
-            app_logger.debug(f"Available semesters: {texts}")
+                    payload: Any = json.loads(body)
+                    self._log_debug(f"Parsed semester payload as JSON: {payload}")
+                    if isinstance(payload, list):
+                        entries = cast("list[Any]", payload)
+                        for item in entries:
+                            if not isinstance(item, dict):
+                                continue
+                            entry = cast("dict[Any, Any]", item)
+                            batch_id = self._parse_batch_id(entry.get("value"))
+                            if batch_id is not None:
+                                values.append(batch_id)
+                                texts[batch_id] = str(
+                                    entry.get("text", entry.get("label", ""))
+                                )
+                except ValueError as error:
+                    self._log_debug(
+                        f"Could not parse semester payload as JSON: {error}"
+                    )
+            self._log_debug(f"Available semesters: {texts}")
             return (values if values else None, texts if texts else None)
-        except requests.RequestException as e:
-            app_logger.debug(f"Failed to fetch semester batch ids: {e}")
+        except (TimeoutError, aiohttp.ClientError) as error:
+            self._log_debug(f"Failed to fetch semester batch ids: {error}")
             return (None, None)
 
-    def scrape_attendance_data(self) -> Optional[List[List[str]]]:
-        app_logger.debug(
+    @staticmethod
+    def _parse_batch_id(value: Any) -> int | None:
+        """Extract a numeric batch id from an option value.
+
+        Args:
+            value: Raw option value (may contain quotes or prefixes).
+
+        Returns:
+            Parsed integer id, or None when the value has no digits.
+        """
+        if value is None:
+            return None
+        digits = "".join(filter(str.isdigit, str(value)))
+        if not digits:
+            return None
+        try:
+            return int(digits)
+        except ValueError:
+            return None
+
+    async def scrape_attendance_data(self) -> list[list[str]] | None:
+        """Scrape attendance rows across all known batch class ids.
+
+        Returns:
+            List of raw table rows (each a list of cell strings), or None
+            when no data could be retrieved.
+
+        Raises:
+            AttendanceScrapingError: If scraping fails unexpectedly.
+        """
+        self._log_debug(
             f"Starting attendance data scraping for branch: {self.branch_prefix}"
         )
 
         try:
-            # Ensure the profile context is prepared and get a CSRF token
-            csrf_token = self._prepare_profile_context()
+            csrf_token = await self._prepare_profile_context()
+            await self._ensure_batch_ids(csrf_token)
 
-            # If batch class IDs are not configured (None/empty), attempt to fetch them
             if not self.batch_class_ids:
-                ids, texts = self._fetch_semester_batch_ids(csrf_token)
-                if ids:
-                    # Record auto-discovery and build suggestion message
-                    self._auto_discovered_batch_ids = ids
-                    self.sem_texts = texts
-                    self.batch_class_ids = ids if len(ids) > 1 else ids[0]
-                    try:
-                        prefix = re.sub(r"\d+$", "", self.username)
-                        ids_str = ",".join(str(x) for x in ids)
-                        app_log(
-                            "mapping.auto_discovered",
-                            f"Auto-discovered batchClassId(s) during scraping: {self.batch_class_ids}",
-                        )
-                    except Exception:
-                        try:
-                            app_logger.info(
-                                f"Auto-discovered batchClassId(s) during scraping: {self.batch_class_ids}"
-                            )
-                        except Exception:
-                            pass
-                else:
-                    app_logger.warning(
-                        "No batchClassId configured and auto-discovery failed; cannot fetch attendance"
-                    )
-                    return None
+                self._log_warning(
+                    "No batchClassId configured and auto-discovery failed. "
+                    "Cannot fetch attendance."
+                )
+                return None
 
-            # Try each batch class ID until we get valid data
-            batch_ids = self._normalize_batch_ids(self.batch_class_ids)
-
-            for batch_id in batch_ids:
-                attendance_data = self._fetch_attendance_for_batch(batch_id, csrf_token)
-
+            for batch_id in self._normalize_batch_ids(self.batch_class_ids):
+                attendance_data = await self._fetch_attendance_for_batch(
+                    batch_id, csrf_token
+                )
                 if attendance_data:
-                    app_logger.info(
-                        f"Successfully retrieved attendance data for "
+                    self._log_info(
+                        "Successfully retrieved attendance data for "
                         f"batch ID: {batch_id}"
                     )
                     return attendance_data
 
-            app_logger.warning(
+            self._log_warning(
                 "No attendance data found for any configured batch class ID"
             )
             return None
 
-        except Exception as e:
-            raise AttendanceScrapingError(f"Failed to scrape attendance data: {e}")
+        except Exception as error:
+            raise AttendanceScrapingError(
+                f"Failed to scrape attendance data: {error}"
+            ) from error
 
-    def _normalize_batch_ids(self, batch_ids: Union[int, List[int]]) -> List[str]:
+    @staticmethod
+    def _normalize_batch_ids(batch_ids: int | list[int]) -> list[str]:
+        """Normalize configured batch ids to a list of strings.
+
+        Args:
+            batch_ids: Single id or list of ids.
+
+        Returns:
+            List of stringified batch ids.
+        """
         if isinstance(batch_ids, list):
-            return [str(bid) for bid in batch_ids]
+            return [str(batch_id) for batch_id in batch_ids]
         return [str(batch_ids)]
 
-    def _fetch_attendance_for_batch(
+    async def _fetch_attendance_for_batch(
         self, batch_id: str, csrf_token: str
-    ) -> Optional[List[List[str]]]:
+    ) -> list[list[str]] | None:
+        """Fetch and parse the attendance table for one batch id.
+
+        Args:
+            batch_id: Batch class id to query.
+            csrf_token: CSRF token for the admin endpoint.
+
+        Returns:
+            Parsed attendance rows, or None on HTTP/network failure.
+        """
         attendance_url = f"{self.BASE_URL}/s/studentProfilePESUAdmin"
 
         request_payload = {
@@ -746,188 +1142,237 @@ class PESUAttendanceScraper:
         }
 
         try:
-            response = self.session.post(
-                attendance_url, data=request_payload, headers=headers, timeout=15
-            )
+            session = await self._get_session()
+            async with session.post(
+                attendance_url, data=request_payload, headers=headers
+            ) as response:
+                if response.status != 200:
+                    response_url = str(response.url)
+                    self._log_debug(
+                        f"Attendance POST status={response.status} url={response_url}"
+                    )
+                    self._log_debug(f"Session cookies: {self._cookie_dict()}")
+                    # Retry over HTTPS when the server redirected to plain HTTP.
+                    try:
+                        if response_url.startswith("http://"):
+                            alt = "https://" + response_url.split("://", 1)[1]
+                            self._log_debug(
+                                f"Retrying attendance URL with https: {alt}"
+                            )
+                            async with session.post(
+                                alt, data=request_payload, headers=headers
+                            ) as alt_response:
+                                if alt_response.status == 200:
+                                    return self._parse_attendance_table(
+                                        await alt_response.text()
+                                    )
+                    except (TimeoutError, aiohttp.ClientError):
+                        pass
 
-            # If we are redirected to sessionExpired or an HTTP 4xx occurs, log cookies & try https fallback
-            if response.status_code != 200:
-                app_logger.debug(
-                    f"Attendance POST status={response.status_code} url={response.url}"
-                )
-                cookies = self.session.cookies.get_dict()
-                app_logger.debug(f"Session cookies: {cookies}")
-                # If server redirected to an http URL that returns 404, try https equivalent
-                try:
-                    if getattr(response, "url", "").startswith("http://"):
-                        alt = "https://" + response.url.split("://", 1)[1]
-                        app_logger.debug(f"Retrying attendance URL with https: {alt}")
-                        alt_resp = self.session.post(
-                            alt, data=request_payload, headers=headers, timeout=15
-                        )
-                        if alt_resp.status_code == 200:
-                            return self._parse_attendance_table(alt_resp.text)
-                except Exception:
-                    pass
+                    self._log_error(
+                        f"HTTP {response.status} error for batch ID {batch_id}"
+                    )
+                    return None
 
-                app_logger.error(
-                    f"HTTP {response.status_code} error for batch ID {batch_id}"
-                )
-                return None
+                return self._parse_attendance_table(await response.text())
 
-            return self._parse_attendance_table(response.text)
-
-        except requests.RequestException as e:
-            app_logger.error(
-                f"Network error fetching data for batch ID {batch_id}: {e}"
+        except (TimeoutError, aiohttp.ClientError) as error:
+            self._log_error(
+                f"Network error fetching data for batch ID {batch_id}: {error}"
             )
             return None
 
-    def _parse_attendance_table(self, html_content: str) -> Optional[List[List[str]]]:
+    def _parse_attendance_table(self, html_content: str) -> list[list[str]] | None:
+        """Parse the attendance HTML table into raw rows.
+
+        Args:
+            html_content: Raw HTML of the admin endpoint response.
+
+        Returns:
+            List of valid attendance rows, or None when no table/rows exist.
+        """
         soup = BeautifulSoup(html_content, "html.parser")
         attendance_table = soup.find("table", {"class": "table"})
 
         if not attendance_table:
-            app_log(
-                "scrape.no_table_found",
-                "No attendance table found in response",
-                "warning",
-            )
+            self._log_warning("No attendance table found in response")
             return None
 
-        table_body = attendance_table.find("tbody")  # type: ignore
+        table_body = attendance_table.find("tbody")
         if not table_body:
-            app_log(
-                "scrape.no_table_body",
-                "No table body found in attendance table",
-                "warning",
-            )
+            self._log_warning("No table body found in attendance table")
             return None
 
-        attendance_records = []
-
-        for row in table_body.find_all("tr"):  # type: ignore
+        attendance_records: list[list[str]] = []
+        for row in table_body.find_all("tr"):
             row_data = self._extract_row_data(row)
-
             if row_data and self._is_valid_attendance_record(row_data):
                 attendance_records.append(row_data)
 
         return attendance_records if attendance_records else None
 
-    def _extract_row_data(self, table_row) -> List[str]:
+    @staticmethod
+    def _extract_row_data(table_row: Tag) -> list[str]:
+        """Extract stripped cell texts from a table row.
+
+        Args:
+            table_row: BeautifulSoup ``<tr>`` tag.
+
+        Returns:
+            List of cell texts.
+        """
         return [cell.get_text(strip=True) for cell in table_row.find_all("td")]
 
-    def _is_valid_attendance_record(self, row_data: List[str]) -> bool:
-        # Require at least a subject code/name; allow NA values in numeric columns
+    def _is_valid_attendance_record(self, row_data: list[str]) -> bool:
+        """Predicate: row holds a usable attendance record.
+
+        Rows with ``'NA'`` numeric columns satisfy the predicate. Only rows
+        with fewer than 2 cells or an empty subject code do not.
+
+        Args:
+            row_data: Raw row cells.
+
+        Returns:
+            True when the row has a non-empty subject code.
+        """
         if len(row_data) < 2:
             return False
 
-        # Reject rows with empty subject/course code
         if not row_data[0] or not row_data[0].strip():
             return False
 
-        # If the numeric column(s) are 'NA' we still consider this a valid record
-        if (
-            len(row_data) > 2
-            and isinstance(row_data[2], str)
-            and row_data[2].strip().upper() == "NA"
-        ):
-            app_logger.debug(
+        if len(row_data) > 2 and row_data[2].strip().upper() == "NA":
+            self._log_debug(
                 f"Attendance entry contains 'NA' but will be included: {row_data}"
             )
 
         return True
 
 
-def fetch_student_attendance(
-    username: str, password: str, batch_id: Optional[int] = None
-) -> tuple[Optional[List[List[str]]], PESUAttendanceScraper]:
-    """Convenience function that returns (attendance_data, scraper) for external usage.
+async def fetch_student_attendance(
+    username: str,
+    password: str,
+    batch_id: int | None = None,
+) -> tuple[list[list[str]] | None, PESUAttendanceScraper]:
+    """Fetch attendance rows for a student, returning the scraper for context.
 
-    The returned scraper may contain an informational suggestion if batchClassId(s)
-    were auto-discovered during login or scraping.
+    Args:
+        username: PESU Academy username (SRN).
+        password: PESU Academy password.
+        batch_id: Optional explicit batch class id.
+
+    Returns:
+        Tuple of (attendance rows or None, configured scraper). The scraper
+        exposes auto-discovered batch ids and the subject mapping.
     """
     scraper = PESUAttendanceScraper(username, password, batch_id)
 
     try:
-        scraper.login()
-        return scraper.scrape_attendance_data(), scraper
+        await scraper.login()
+        return await scraper.scrape_attendance_data(), scraper
     finally:
-        scraper.logout()
+        await scraper.close()
 
 
-# ============================================================================
-# API MODELS AND ROUTES
-# ============================================================================
+class AttendanceRequest(BaseModel):
+    """Validated request body for ``POST /api/attendance``.
 
-AttendanceRequest = Dict[str, Any]
-AttendanceResponse = Dict[str, Any]
+    Attributes:
+        username: PESU Academy username (SRN).
+        password: PESU Academy password.
+        batch_id: Optional explicit batch class id.
+    """
+
+    username: str = Field(min_length=1, description="PESU Academy username (SRN)")
+    password: str = Field(min_length=1, description="PESU Academy password")
+    batch_id: int | None = Field(default=None, description="Explicit batch class id")
 
 
-async def process_attendance_task(
-    username: str, password: str, batch_id: Optional[int] = None
-) -> Dict[str, Any]:
-    """Process attendance data and return results synchronously."""
-    # Initialize scraper as None to handle edge cases
-    scraper: Optional[PESUAttendanceScraper] = None
+class SemesterRequest(BaseModel):
+    """Validated request body for ``POST /api/semesters``.
 
+    Attributes:
+        username: PESU Academy username (SRN).
+        password: PESU Academy password.
+    """
+
+    username: str = Field(min_length=1, description="PESU Academy username (SRN)")
+    password: str = Field(min_length=1, description="PESU Academy password")
+
+
+class AttendanceRecord(BaseModel):
+    """Formatted attendance entry for a single subject.
+
+    Attributes:
+        subject: Display name of the subject.
+        course_name: Raw course name from PESU Academy, if available.
+        total_classes: Total classes held, or None when reported as ``NA``.
+        percentage: Attendance percentage, or None when reported as ``NA``.
+        raw_data: Raw total-classes cell value from the scraped table.
+    """
+
+    subject: str
+    course_name: str | None = None
+    total_classes: int | None = None
+    percentage: float | None = None
+    raw_data: str | None = None
+
+
+def _coerce_int(value: str | None) -> int | None:
+    """Coerce a scraped cell to int, mapping ``'NA'`` to None.
+
+    Args:
+        value: Raw cell text.
+
+    Returns:
+        Parsed integer or None when absent/unparseable.
+    """
+    if not value:
+        return None
+    text = value.strip()
+    if text.upper() == "NA":
+        return None
+    match = re.search(r"(\d+)", text)
+    return int(match.group(1)) if match else None
+
+
+def _coerce_float(value: str | None) -> float | None:
+    """Coerce a scraped cell to float, mapping ``'NA'`` to None.
+
+    Args:
+        value: Raw cell text (may include a ``%`` suffix).
+
+    Returns:
+        Parsed float or None when absent/unparseable.
+    """
+    if not value:
+        return None
+    text = value.strip().replace("%", "")
+    if text.upper() == "NA":
+        return None
     try:
-        app_log(
-            "fetch.start", f"Starting attendance processing for SRN: {username[:10]}"
-        )
-
-        # Initialize scraper for subject mapping access (for client-friendly labels)
-        # Fetch attendance data using convenience function which also returns the scraper
-        attendance_data, used_scraper = fetch_student_attendance(
-            username, password, batch_id
-        )
-
-        if not attendance_data:
-            raise AttendanceScrapingError("No attendance data retrieved")
-
-        app_log("fetch.formatting", "Formatting attendance data")
-
-        # Format attendance data for client consumption using the returned scraper's subject mapping
-        formatted_attendance = _format_attendance_data(
-            attendance_data, used_scraper.subject_mapping
-        )
-
-        result = {
-            "status": "complete",
-            "attendance": formatted_attendance,
-        }
-
-        # If we auto-discovered batchClassIds, include the structured list so the frontend
-        # can present them interactively to the user (choose/default leftmost)
-        if getattr(used_scraper, "_auto_discovered_batch_ids", None):
-            result["discovered_batch_ids"] = [
-                str(x) for x in used_scraper._auto_discovered_batch_ids
-            ]
-
-        app_log("fetch.complete", "Attendance processing completed successfully")
-
-        return result
-
-    except (AuthenticationError, AttendanceScrapingError) as e:
-        # Handle specific scraping errors with detailed logging
-        error_msg = f"Attendance processing error: {str(e)}"
-        app_log("error.attendance_processing", error_msg, "error")
-        raise
-
-    except Exception as e:
-        # Handle unexpected errors with comprehensive logging
-        error_msg = f"Unexpected error during processing: {str(e)}"
-        app_log("error.unexpected", error_msg, "error")
-        raise
+        return float(text)
+    except ValueError:
+        match = re.search(r"(\d+(?:\.\d+)?)", text)
+        return float(match.group(1)) if match else None
 
 
-def _format_attendance_data(
-    attendance_data: List[List[str]], subject_mapping: Dict[str, str]
-) -> List[Dict[str, Any]]:
-    formatted_attendance: List[Dict[str, Any]] = []
+def format_attendance_data(
+    attendance_data: list[list[str]], subject_mapping: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Normalize raw scraped rows into client-friendly dictionaries.
+
+    Args:
+        attendance_data: Raw rows from :meth:`PESUAttendanceScraper.scrape_attendance_data`.
+        subject_mapping: Mapping of raw subject codes to display names.
+
+    Returns:
+        List of formatted attendance dicts with ``subject``, ``course_name``,
+        ``total_classes``, ``percentage`` and ``raw_data`` keys.
+    """
+    formatted_attendance: list[dict[str, Any]] = []
 
     for item in attendance_data:
-        # Require at least subject code/name
         if len(item) < 1:
             continue
 
@@ -936,34 +1381,11 @@ def _format_attendance_data(
         raw_total = item[2] if len(item) > 2 else None
         raw_percentage = item[3] if len(item) > 3 else None
 
-        # Normalize 'NA' to None and attempt to coerce numeric values
-        def normalize_int(val: Optional[str]) -> Optional[int]:
-            if not val:
-                return None
-            v = val.strip()
-            if v.upper() == "NA":
-                return None
-            m = re.search(r"(\d+)", v)
-            return int(m.group(1)) if m else None
-
-        def normalize_float(val: Optional[str]) -> Optional[float]:
-            if not val:
-                return None
-            v = val.strip().replace("%", "")
-            if v.upper() == "NA":
-                return None
-            try:
-                return float(v)
-            except Exception:
-                m = re.search(r"(\d+(?:\.\d+)?)", v)
-                return float(m.group(1)) if m else None
-
-        total_classes = normalize_int(raw_total)
-        percentage = normalize_float(raw_percentage)
+        total_classes = _coerce_int(raw_total)
+        percentage = _coerce_float(raw_percentage)
 
         if (
             total_classes is None
-            and raw_total
             and isinstance(raw_total, str)
             and raw_total.strip().upper() == "NA"
         ):
@@ -972,45 +1394,117 @@ def _format_attendance_data(
             )
 
         formatted_attendance.append(
-            {
-                "subject": subject_mapping.get(subject_code, subject_code),
-                "course_name": course_name,
-                "total_classes": total_classes,
-                "percentage": percentage,
-                "raw_data": raw_total,
-            }
+            AttendanceRecord(
+                subject=subject_mapping.get(subject_code, subject_code),
+                course_name=course_name,
+                total_classes=total_classes,
+                percentage=percentage,
+                raw_data=raw_total,
+            ).model_dump()
         )
 
     return formatted_attendance
 
 
-# ============================================================================
-# FASTAPI APPLICATION SETUP
-# ============================================================================
+async def process_attendance_task(
+    username: str, password: str, batch_id: int | None = None
+) -> dict[str, Any]:
+    """Fetch, format and return attendance data for a student.
 
-# Initialize configuration and logger
+    Fully asynchronous end to end. Safe to await directly from async routes.
+
+    Args:
+        username: PESU Academy username (SRN).
+        password: PESU Academy password.
+        batch_id: Optional explicit batch class id.
+
+    Returns:
+        Result dict with ``status``, ``attendance`` and optionally
+        ``discovered_batch_ids``.
+
+    Raises:
+        AuthenticationError: If login fails.
+        AttendanceScrapingError: If no attendance data is retrieved.
+    """
+    try:
+        app_log(
+            "fetch.start", f"Starting attendance processing for SRN: {username[:10]}"
+        )
+
+        attendance_data, used_scraper = await fetch_student_attendance(
+            username, password, batch_id
+        )
+
+        if not attendance_data:
+            raise AttendanceScrapingError("No attendance data retrieved")
+
+        app_log("fetch.formatting", "Formatting attendance data")
+
+        formatted_attendance = format_attendance_data(
+            attendance_data, used_scraper.subject_mapping
+        )
+
+        result: dict[str, Any] = {
+            "status": "complete",
+            "attendance": formatted_attendance,
+        }
+
+        if used_scraper.auto_discovered_batch_ids:
+            result["discovered_batch_ids"] = [
+                str(batch_id) for batch_id in used_scraper.auto_discovered_batch_ids
+            ]
+
+        app_log("fetch.complete", "Attendance processing completed successfully")
+
+        return result
+
+    except (AuthenticationError, AttendanceScrapingError) as error:
+        app_log(
+            "error.attendance_processing",
+            f"Attendance processing error: {error}",
+            "error",
+        )
+        raise
+    except Exception as error:
+        app_log(
+            "error.unexpected", f"Unexpected error during processing: {error}", "error"
+        )
+        raise
+
+
+# Initialize configuration and logger at import time so serverless
+# environments (e.g. Vercel's `main:app`) work without a factory call.
 try:
     mappings = load_mappings_config()
     settings = load_app_settings()
     app_logger = setup_logger()
 
-    # Small helper to emit semantic, machine-parseable log keys along with human-friendly messages
     def app_log(key: str, message: str | None = None, level: str = "info") -> None:
+        """Record an event-keyed log line.
+
+        Emits ``[key] message`` at the given level and attaches
+        ``event=key`` to the record so structured sinks index it.
+
+        Args:
+            key: Machine-readable event key (e.g. ``"fetch.start"``).
+            message: Human-readable detail. Defaults to the key itself.
+            level: One of ``"debug"``, ``"warning"``, ``"error"`` or ``"info"``.
+                Unknown values fall back to ``"info"``.
+        """
         msg = f"[{key}] {message or key}"
+        extra = {"event": key}
         if level == "debug":
-            app_logger.debug(msg)
+            app_logger.debug(msg, extra=extra)
         elif level == "warning":
-            app_logger.warning(msg)
+            app_logger.warning(msg, extra=extra)
         elif level == "error":
-            app_logger.error(msg)
+            app_logger.error(msg, extra=extra)
         else:
-            app_logger.info(msg)
+            app_logger.info(msg, extra=extra)
 
-except ConfigurationError as e:
-    # Re-raise with additional context for easier debugging
-    raise ConfigurationError(f"Failed to initialize configuration: {e}") from e
+except ConfigurationError as error:
+    raise ConfigurationError(f"Failed to initialize configuration: {error}") from error
 
-# Initialize FastAPI app and router
 app = FastAPI(
     title="PESU Academy Attendance Tracker",
     description="Fetch and analyze student attendance data from PESUAcademy",
@@ -1020,136 +1514,123 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 router = APIRouter()
 
 
+def _build_sha() -> str:
+    """Short commit SHA of the running build.
+
+    Returns:
+        First 7 characters of ``VERCEL_GIT_COMMIT_SHA``, or ``"local"``
+        outside Vercel.
+    """
+    return (os.getenv("VERCEL_GIT_COMMIT_SHA") or "local")[:7]
+
+
 @router.get("/healthcheck")
-async def healthcheck() -> Dict[str, Any]:
+async def healthcheck() -> dict[str, Any]:
+    """Report service health.
+
+    Returns:
+        Success envelope with ``{"status": "healthy"}``. Carries the
+        running build SHA so deployments are fingerprinted.
+    """
     return APIResponse.success(
-        data={"status": "healthy"},
+        data={"status": "healthy", "build": _build_sha()},
         code="healthcheck_ok",
         message="Service is healthy and operational",
     )
 
 
 @router.post("/attendance")
-async def get_attendance(request: dict = Body(...)) -> dict:
-    try:
-        # Process attendance data
-        username = request.get("username")
-        password = request.get("password")
-        batch_id = request.get("batch_id")
-        if not username or not password:
-            response, status_code = APIResponse.error(
-                error_type="ValidationError",
-                details="username and password are required",
-                code="missing_credentials",
-                status_code=400,
-            )
-            raise HTTPException(status_code=status_code, detail=response)
+async def get_attendance(payload: AttendanceRequest) -> dict[str, Any]:
+    """Fetch formatted attendance for a student.
 
-        result = await process_attendance_task(username, password, batch_id)
+    Natively async: the scrape pipeline uses non-blocking I/O throughout.
+
+    Args:
+        payload: Validated attendance request body.
+
+    Returns:
+        Success envelope wrapping the attendance result.
+
+    Raises:
+        HTTPException: 401 on auth failure, 500 on config/scraping errors.
+    """
+    try:
+        result = await process_attendance_task(
+            payload.username, payload.password, payload.batch_id
+        )
 
         return APIResponse.success(
             data=result,
             code="attendance_retrieved",
-            message=f"Attendance data retrieved for {username}",
+            message=f"Attendance data retrieved for {payload.username}",
         )
 
     except ConfigurationError as error:
         app_log("error.config", f"Configuration error: {error}", "error")
-        response, status_code = APIResponse.error(
-            error_type="ConfigurationError",
-            details=str(error),
-            code="config_error",
-            status_code=500,
-        )
-        raise HTTPException(status_code=status_code, detail=response)
-
+        raise http_error("ConfigurationError", str(error), "config_error", 500)
     except AuthenticationError as error:
         app_log("auth.failed", f"Authentication failed: {error}", "warning")
-        response, status_code = APIResponse.error(
-            error_type="AuthenticationError",
-            details=str(error),
-            code="auth_failed",
-            status_code=401,
-        )
-        raise HTTPException(status_code=status_code, detail=response)
-
+        raise http_error("AuthenticationError", str(error), "auth_failed", 401)
     except AttendanceScrapingError as error:
         app_log("error.scraping", f"Scraping error: {error}", "error")
-        response, status_code = APIResponse.error(
-            error_type="ScrapingError",
-            details=str(error),
-            code="scraping_failed",
-            status_code=500,
-        )
-        raise HTTPException(status_code=status_code, detail=response)
-
-    except Exception as error:
+        raise http_error("ScrapingError", str(error), "scraping_failed", 500)
+    except Exception as error:  # noqa: BLE001 - intentional catch-all mapping to 500
         app_log("error.unexpected", f"Unexpected error: {error}", "error")
-        response, status_code = APIResponse.error(
-            error_type="UnexpectedError",
-            details=str(error),
-            code="internal_error",
-            status_code=500,
-        )
-        raise HTTPException(status_code=status_code, detail=response)
+        raise http_error("UnexpectedError", str(error), "internal_error", 500)
 
 
-@router.post("/semesters", include_in_schema=True)
-async def get_semesters(request: dict = Body(...)) -> dict:
+@router.post("/semesters")
+async def get_semesters(payload: SemesterRequest) -> dict[str, Any]:
+    """List available semesters (batch ids) for a student.
+
+    Natively async: the scraper uses non-blocking I/O throughout.
+
+    Args:
+        payload: Validated semester request body.
+
+    Returns:
+        Success envelope wrapping ``{"semesters": ...}``.
+
+    Raises:
+        HTTPException: 500 when semester discovery fails.
+    """
     try:
-        username = request.get("username")
-        password = request.get("password")
-        if not username or not password:
-            response, status_code = APIResponse.error(
-                error_type="ValidationError",
-                details="username and password are required",
-                code="missing_credentials",
-                status_code=400,
-            )
-            raise HTTPException(status_code=status_code, detail=response)
-
-        # Create scraper and login to get semesters
-        scraper = PESUAttendanceScraper(username, password)
+        scraper = PESUAttendanceScraper(payload.username, payload.password)
         try:
-            scraper.login()
-            batch_ids, texts = scraper._fetch_semester_batch_ids(
-                scraper._prepare_profile_context()
-            )
+            await scraper.login()
+            texts = await scraper.get_semester_options()
             return APIResponse.success(
                 data={"semesters": texts},
                 code="semesters_retrieved",
-                message=f"Available semesters retrieved for {username}",
+                message=f"Available semesters retrieved for {payload.username}",
             )
         finally:
-            scraper.logout()
+            await scraper.close()
 
-    except Exception as e:
+    except Exception as error:  # noqa: BLE001 - intentional catch-all mapping to 500
         app_log(
             "semester.fetch_error",
-            f"Error fetching semesters for {username}: {e}",
+            f"Error fetching semesters for {payload.username}: {error}",
             "error",
         )
-        response, status_code = APIResponse.error(
-            error_type="SemesterError",
-            details=str(e),
-            code="semesters_failed",
-            status_code=500,
-        )
-        raise HTTPException(status_code=status_code, detail=response)
+        raise http_error("SemesterError", str(error), "semesters_failed", 500)
 
 
-# Include API routes and mount static files
 app.include_router(router, prefix="/api")
 
 
-# Serve single authoritative mapping.json from repo root for frontend requests
 @app.get("/mapping.json", include_in_schema=False)
-async def serve_mapping_json():
-    repo_root = Path(__file__).resolve().parent
-    config_path = repo_root / "frontend" / "web" / "mapping.json"
+async def serve_mapping_json() -> JSONResponse:
+    """Serve the authoritative ``mapping.json`` for frontend requests.
+
+    Returns:
+        JSON response with the mapping contents, or a standardized error
+        payload when the file is missing or invalid.
+    """
+    config_path = REPO_ROOT / FRONTEND_WEB_DIR / "mapping.json"
     try:
-        with config_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+        with config_path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
         return JSONResponse(content=data, status_code=200)
     except FileNotFoundError:
         payload, status_code = APIResponse.error(
@@ -1159,140 +1640,246 @@ async def serve_mapping_json():
             status_code=404,
         )
         return JSONResponse(content=payload, status_code=status_code)
-    except json.JSONDecodeError as e:
+    except json.JSONDecodeError as error:
         payload, status_code = APIResponse.error(
             error_type="ConfigError",
-            details=f"Invalid mapping.json: {e}",
+            details=f"Invalid mapping.json: {error}",
             code="mapping_invalid",
             status_code=500,
         )
         return JSONResponse(content=payload, status_code=status_code)
 
 
-# Serve cached JavaScript files with long-term caching
-@app.get("/chart.min.js", include_in_schema=False)
-async def serve_chart_js():
-    repo_root = Path(__file__).resolve().parent
-    file_path = repo_root / "frontend" / "web" / "chart.min.js"
+def _cached_js_response(filename: str) -> FileResponse:
+    """Build a long-cached JavaScript file response.
+
+    Args:
+        filename: File name under ``frontend/web``.
+
+    Returns:
+        File response with immutable caching headers.
+
+    Raises:
+        HTTPException: 404 when the file does not exist.
+    """
+    file_path = REPO_ROOT / FRONTEND_WEB_DIR / filename
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="chart.min.js not found")
-    
-    response = FileResponse(
+        raise HTTPException(status_code=404, detail=f"{filename} not found")
+
+    return FileResponse(
         path=file_path,
         media_type="application/javascript",
-        headers={"Cache-Control": "public, max-age=31536000, immutable"}
+        headers={"Cache-Control": IMMUTABLE_JS_CACHE_CONTROL},
     )
-    return response
+
+
+@app.get("/chart.min.js", include_in_schema=False)
+async def serve_chart_js() -> FileResponse:
+    """Serve the cached Chart.js bundle.
+
+    Returns:
+        Immutable-cached JavaScript response.
+    """
+    return _cached_js_response("chart.min.js")
 
 
 @app.get("/i.js", include_in_schema=False)
-async def serve_i_js():
-    repo_root = Path(__file__).resolve().parent
-    file_path = repo_root / "frontend" / "web" / "i.js"
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="i.js not found")
-    
-    response = FileResponse(
-        path=file_path,
-        media_type="application/javascript",
-        headers={"Cache-Control": "public, max-age=31536000, immutable"}
-    )
-    return response
+async def serve_i_js() -> FileResponse:
+    """Serve the cached ``i.js`` bundle.
+
+    Returns:
+        Immutable-cached JavaScript response.
+    """
+    return _cached_js_response("i.js")
 
 
 if settings.ENABLE_BACKEND_WEB:
-    app.mount("/", StaticFiles(directory="frontend/web", html=True), name="frontend")
+    app.mount(
+        "/",
+        StaticFiles(directory=REPO_ROOT / FRONTEND_WEB_DIR, html=True),
+        name="frontend",
+    )
 else:
     app_log(
         "config.frontend_disabled",
         "Frontend static files mount disabled (ENABLE_BACKEND_WEB=false)",
     )
 
-    # Provide helpful root response when frontend static files are disabled
     @app.get("/", include_in_schema=False)
-    async def frontend_disabled_root():
-        response_payload, status_code = APIResponse.error(
+    async def frontend_disabled_root() -> JSONResponse:
+        """Explain that the web frontend is disabled.
+
+        Returns:
+            Standardized ``FeatureDisabled`` error payload (404).
+        """
+        payload, status_code = APIResponse.error(
             error_type="FeatureDisabled",
-            details="Frontend disabled. Set ENABLE_BACKEND_WEB=true to enable serving the web frontend.",
+            details=FRONTEND_DISABLED_DETAILS,
             code="frontend_disabled",
             status_code=404,
         )
-        return JSONResponse(content=response_payload, status_code=status_code)
+        return JSONResponse(content=payload, status_code=status_code)
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    async def frontend_disabled_catchall(full_path: str):
-        if (
-            full_path.startswith("api")
-            or full_path.startswith("docs")
-            or full_path.startswith("openapi.json")
-            or full_path.startswith("redoc")
-        ):
-            response_payload, status_code = APIResponse.error(
+    async def frontend_disabled_catchall(full_path: str) -> JSONResponse:
+        """Catch all non-API paths when the frontend is disabled.
+
+        Args:
+            full_path: Unmatched request path.
+
+        Returns:
+            ``NotFound`` for reserved API/doc paths, otherwise a
+            ``FeatureDisabled`` error payload.
+        """
+        if full_path.startswith(("api", "docs", "openapi.json", "redoc")):
+            payload, status_code = APIResponse.error(
                 error_type="NotFound",
                 details=f"Path '/{full_path}' not found",
                 code="not_found",
                 status_code=404,
             )
-            return JSONResponse(content=response_payload, status_code=status_code)
+            return JSONResponse(content=payload, status_code=status_code)
 
-        response_payload, status_code = APIResponse.error(
+        payload, status_code = APIResponse.error(
             error_type="FeatureDisabled",
-            details="Frontend disabled. Set ENABLE_BACKEND_WEB=true to enable serving the web frontend.",
+            details=FRONTEND_DISABLED_DETAILS,
             code="frontend_disabled",
             status_code=404,
         )
-        return JSONResponse(content=response_payload, status_code=status_code)
+        return JSONResponse(content=payload, status_code=status_code)
 
 
-def run(argv: list | None = None) -> None:
-    """Run the application. This is also used as the package console entrypoint (scripts: attend)."""
-    import argparse
+def _launch_telegram_bot() -> subprocess.Popen[bytes] | None:
+    """Launch the Telegram bot as a detached subprocess when enabled.
 
-    parser = argparse.ArgumentParser()
-    args = parser.parse_args(argv)
+    Returns:
+        The bot subprocess handle, or None when the bot is disabled or its
+        script is missing. Exits the process when the token is misconfigured.
+    """
+    if not settings.ENABLE_BACKEND_TELEGRAM:
+        return None
 
-    # Start Telegram bot subprocess if enabled
-    bot_proc = None
+    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not telegram_bot_token:
+        print(
+            "ERROR: ENABLE_BACKEND_TELEGRAM is enabled but TELEGRAM_BOT_TOKEN "
+            "is not set in .env"
+        )
+        print(
+            "Please add TELEGRAM_BOT_TOKEN to your .env file or disable the Telegram bot."
+        )
+        sys.exit(1)
+
+    tg_bot_path = REPO_ROOT / "frontend" / "telegram" / "tg_bot.py"
+    if not tg_bot_path.exists():
+        print(f"Telegram bot file not found at: {tg_bot_path}, skipping bot start")
+        return None
+
+    bot_proc = subprocess.Popen(
+        [sys.executable, str(tg_bot_path)],
+        env=os.environ.copy(),
+        start_new_session=True,
+    )
+
+    def _terminate_bot() -> None:
+        _terminate_process(bot_proc)
+
+    atexit.register(_terminate_bot)
+    print(f"Started telegram bot subprocess (pid={bot_proc.pid})")
+    return bot_proc
+
+
+def _terminate_process(proc: subprocess.Popen[bytes] | None) -> None:
+    """Terminate a subprocess gracefully, escalating to kill on failure.
+
+    Args:
+        proc: Subprocess handle or None (no-op).
+    """
+    if proc is None or proc.poll() is not None:
+        return
     try:
-        if settings.ENABLE_BACKEND_TELEGRAM:
-            telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-            if not telegram_bot_token:
-                print(
-                    "ERROR: ENABLE_BACKEND_TELEGRAM is enabled but TELEGRAM_BOT_TOKEN is not set in .env"
-                )
-                print(
-                    "Please add TELEGRAM_BOT_TOKEN to your .env file or disable the Telegram bot."
-                )
-                sys.exit(1)
+        proc.terminate()
+        proc.wait(timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        try:
+            proc.kill()
+        except (OSError, subprocess.SubprocessError):
+            pass
 
-            tg_bot_path = (
-                Path(__file__).resolve().parent / "frontend" / "telegram" / "tg_bot.py"
-            )
-            if tg_bot_path.exists():
-                cmd = [sys.executable, str(tg_bot_path)]
-                env = os.environ.copy()
-                bot_proc = subprocess.Popen(cmd, env=env, start_new_session=True)
 
-                def _terminate_bot():
-                    try:
-                        if bot_proc and bot_proc.poll() is None:
-                            bot_proc.terminate()
-                            bot_proc.wait(timeout=5)
-                    except Exception:
-                        try:
-                            bot_proc.kill()
-                        except Exception:
-                            pass
+def _wait_for_bot(bot_proc: subprocess.Popen[bytes] | None) -> None:
+    """Block until the bot-only subprocess exits.
 
-                atexit.register(_terminate_bot)
-                print(f"Started telegram bot subprocess (pid={bot_proc.pid})")
-            else:
-                print(
-                    f"Telegram bot file not found at: {tg_bot_path}, skipping bot start"
-                )
+    Args:
+        bot_proc: Bot subprocess handle or None (no-op).
+    """
+    if bot_proc is None:
+        return
+    print("Running in bot-only mode. Press Ctrl+C to exit.")
+    try:
+        bot_proc.wait()
+    except KeyboardInterrupt:
+        print("\nShutting down...")
 
-        # Optionally start the web server.
-        # Set ENABLE_BACKEND_WEB=1 (or true) in the environment to enable.
+
+def _uvicorn_log_config() -> dict[str, Any]:
+    """Build the uvicorn logging config using the application formatters.
+
+    Args:
+        None.
+
+    Returns:
+        ``logging.config.dictConfig`` mapping that routes the ``uvicorn``,
+        ``uvicorn.error`` and ``uvicorn.access`` loggers through the same
+        sink format selected by :func:`_select_log_format`.
+    """
+    use_json, use_color = _select_log_format()
+    level = os.getenv("LOG_LEVEL", "INFO").upper()
+    formatter: dict[str, Any] = (
+        {"()": "main.JsonFormatter"}
+        if use_json
+        else {"()": "main.TextFormatter", "color": use_color}
+    )
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {"app": formatter},
+        "handlers": {
+            "app": {
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stderr",
+                "formatter": "app",
+            },
+        },
+        "loggers": {
+            "uvicorn": {"handlers": ["app"], "level": level, "propagate": False},
+            "uvicorn.error": {
+                "handlers": ["app"],
+                "level": level,
+                "propagate": False,
+            },
+            "uvicorn.access": {
+                "handlers": ["app"],
+                "level": level,
+                "propagate": False,
+            },
+        },
+    }
+
+
+def run(argv: list[str] | None = None) -> None:
+    """Run the application server and optional Telegram bot subprocess.
+
+    Args:
+        argv: CLI argument list. Parsed and ignored. No flags are defined.
+    """
+    parser = argparse.ArgumentParser()
+    parser.parse_args(argv)
+
+    bot_proc: subprocess.Popen[bytes] | None = None
+    try:
+        bot_proc = _launch_telegram_bot()
+
         if settings.ENABLE_BACKEND_API:
             if settings.ENABLE_BACKEND_WEB:
                 print(f"Starting web + API server on port {settings.PORT}...")
@@ -1301,34 +1888,17 @@ def run(argv: list | None = None) -> None:
                     f"Starting API server (frontend disabled) on port {settings.PORT}..."
                 )
             uvicorn.run(
-                "main:app", host="0.0.0.0", port=settings.PORT, reload=settings.DEBUG
+                "main:app",
+                host="0.0.0.0",
+                port=settings.PORT,
+                reload=settings.DEBUG,
+                log_config=_uvicorn_log_config(),
             )
         else:
             print("API server disabled (ENABLE_BACKEND_API set to false)")
-            if bot_proc:
-                print("Running in bot-only mode. Press Ctrl+C to exit.")
-                try:
-                    bot_proc.wait()
-                except KeyboardInterrupt:
-                    print("\nShutting down...")
-            # Keep the process alive if only running the bot
-            if bot_proc:
-                print("Running in bot-only mode. Press Ctrl+C to exit.")
-                try:
-                    bot_proc.wait()
-                except KeyboardInterrupt:
-                    print("\nShutting down...")
+            _wait_for_bot(bot_proc)
     finally:
-        # Ensure subprocess is cleaned up on exit
-        if bot_proc and bot_proc.poll() is None:
-            try:
-                bot_proc.terminate()
-                bot_proc.wait(timeout=5)
-            except Exception:
-                try:
-                    bot_proc.kill()
-                except Exception:
-                    pass
+        _terminate_process(bot_proc)
 
 
 if __name__ == "__main__":
