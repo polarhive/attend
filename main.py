@@ -271,7 +271,6 @@ class AppSettings:
         PORT: Port the API server listens on.
         LOG_LEVEL: Logging verbosity name (e.g. ``"INFO"``).
         DEBUG: Whether uvicorn auto-reload is enabled.
-        REQUEST_TIMEOUT_SECONDS: Reserved timeout budget for outbound calls.
         ENABLE_BACKEND_API: Whether to start the API server.
         ENABLE_BACKEND_WEB: Whether to serve the static frontend.
         ENABLE_BACKEND_TELEGRAM: Whether to launch the Telegram bot subprocess.
@@ -289,9 +288,6 @@ class AppSettings:
         self.PORT: int = int(os.getenv("PORT", "10000"))
         self.LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
         self.DEBUG: bool = _env_bool("DEBUG", "false")
-        self.REQUEST_TIMEOUT_SECONDS: int = int(
-            os.getenv("REQUEST_TIMEOUT_SECONDS", "5")
-        )
         self.ENABLE_BACKEND_API: bool = _env_bool("ENABLE_BACKEND_API", "true")
         self.ENABLE_BACKEND_WEB: bool = _env_bool("ENABLE_BACKEND_WEB", "true")
         self.ENABLE_BACKEND_TELEGRAM: bool = _env_bool(

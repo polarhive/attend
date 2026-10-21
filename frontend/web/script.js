@@ -392,7 +392,7 @@ function clearSubmitMode() {
     }
 }
 
-// --- Begin copied app logic (adapted from original script.js) ---
+// Begin copied app logic (adapted from original script.js)
 
 // Constants and Configuration
 let SRN_REGEX = /^PES[12](?:UG|PG)\d{2}[A-Z]{2}\d{3}$/;
@@ -427,7 +427,7 @@ logsDropdown.appendChild(logsSummary);
 logsDropdown.appendChild(logsContainer);
 document.body.appendChild(logsDropdown);
 
-// --- Loader stage helpers (we keep the loader element but insert it when needed) ---
+// Loader stage helpers (we keep the loader element but insert it when needed)
 function fadeOutElement(el, ms = 300) {
     return new Promise(resolve => {
         if (!el) return resolve();
